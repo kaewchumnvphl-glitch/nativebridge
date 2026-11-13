@@ -1,0 +1,6 @@
+{
+  "name": "NativeBridge — เรียนภาษาอังกฤษแบบเจ้าของภาษา",
+  "description": "แพลตฟอร์มเรียนภาษาอังกฤษครบทั้ง 4 ทักษะ ฟัง พูด อ่าน เขียน เหมือนเรียนกับครูเจ้าของภาษาโดยตรง พร้อมระบบวิเคราะห์การออกเสียง บทสนทนาจำลองสถานการณ์จริง และตรวจงานเขียนแบบเจ้าของภาษา",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
