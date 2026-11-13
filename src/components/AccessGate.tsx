@@ -16,7 +16,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import QRCode from "qrcode";
-import { generatePayload } from "promptpay-qr";
+import generatePayload from "promptpay-qr";
 import {
   clearApiKey,
   getApiKey,
