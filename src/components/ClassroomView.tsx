@@ -220,7 +220,7 @@ export function ClassroomView({
                 {isGeneratingLesson ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>กำลังสร้างบทเรียนถัดไป...</span>
+                    <span>กำลังสร้างบทเรียนถัดไป... (1-2 นาที)</span>
                   </>
                 ) : (
                   <>
@@ -382,7 +382,7 @@ export function ClassroomView({
                 {isGeneratingLesson ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>กำลังสร้างบทใหม่...</span>
+                    <span>กำลังสร้างบทใหม่... (1-2 นาที)</span>
                   </>
                 ) : (
                   <>
