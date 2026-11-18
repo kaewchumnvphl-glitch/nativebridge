@@ -8,38 +8,23 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  Info,
   KeyRound,
   Loader2,
-  MessageCircle,
-  QrCode,
-  ShieldCheck,
-  Smartphone,
 } from "lucide-react";
-import QRCode from "qrcode";
-import generatePayload from "promptpay-qr";
+import { hasApiKey, setApiKey, validateApiKey } from "../lib/gemini";
 import {
-  clearApiKey,
-  getApiKey,
-  hasApiKey,
-  setApiKey,
-  validateApiKey,
+  getDeviceId,
+  setTrialStart,
+  hasTrialStarted,
   isInTrial,
   getTrialExpiry,
   submitFeedback,
-  getFeedback,
   resetTrial,
 } from "../lib/access";
 
-/** ข้อมูล PromptPay (สำหรับหน้าจ่ายเงินแบบเก่า/อนาคต) - เก็บไว้ใช้พิมพ์แสดงผลได้ */
-export const PAYMENT = {
-  promptpayId: "0889231826",
-  amountThb: 100,
-  lineId: "champion2026",
-  daysPerPayment: 30,
-};
-
 /** สเต็ปของเกต */
-type GateStep = "checking" | "need-key" | "ready" | "trial-info";
+type GateStep = "checking" | "need-key" | "need-access" | "ready" | "trial-info";
 
 /** ปุ่มคัดลอก */
 function CopyButton({ text, label }: { text: string; label?: string }) {
@@ -204,17 +189,15 @@ function TrialStep({ onDone }: { onDone: () => void }) {
       <div className="space-y-2">
         <ol className="space-y-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
           <li>
-            <span className="font-bold text-blue-600">1.</span>
+            <span className="font-bold text-blue-600">1.</span>{" "}
             <span>กรอก Gemini API Key ของคุณแล้วผ่านขั้นตอนที่ 1 ไปแล้ว</span>
-          </i>
-          </span>
           </li>
           <li>
-            <span className="font-bold text-blue-600">2.</span>
-            <span>ระบบจะตรวจสอบ key อัตโนมัติ และเริ่มนับวันทrial 90 วัน</span>
+            <span className="font-bold text-blue-600">2.</span>{" "}
+            <span>ระบบจะตรวจสอบ key อัตโนมัติ และเริ่มนับวันทดลองใช้ 90 วัน</span>
           </li>
           <li>
-            <span className="font-bold text-blue-600">3.</span>
+            <span className="font-bold text-blue-600">3.</span>{" "}
             <span>เมื่อตรวจสอบผ่าน จะสามารถใช้งานแอปได้ทันที 3 เดือน (90 วัน)</span>
           </li>
         </ol>
@@ -247,7 +230,7 @@ function TrialStep({ onDone }: { onDone: () => void }) {
 
 /* ================= หน้าข้อมูลทrial คงค้าง ================= */
 
-function TrialInfoStep({ hasDoneReset }: { hasDoneReset: () => void }) {
+function TrialInfoStep({ onReset }: { onReset: () => void }) {
   const { expired, daysLeft } = getTrialExpiry();
 
   return (
@@ -264,7 +247,7 @@ function TrialInfoStep({ hasDoneReset }: { hasDoneReset: () => void }) {
       <div className="space-y-2">
         {expired ? (
           <p className="text-sm text-slate-600">
-            <AlertTriangle className="h-4 w-4 text-amber-500" /> <strong>ทrial 3 เดือนสิ้นสุดแล้ว</strong> คุณสามารถหยุดใช้ได้ หรือติดต่อแอดมินเพื่อขอเริ่มทrial ใหม่
+            <AlertTriangle className="h-4 w-4 text-amber-500" /> <strong>ทดลองใช้ 3 เดือนสิ้นสุดแล้ว</strong> คุณสามารถหยุดใช้ได้ หรือติดต่อแอดมินเพื่อขอเริ่มทดลองใช้ใหม่
           </p>
         ) : (
           <p className="text-sm text-slate-600">
@@ -279,16 +262,19 @@ function TrialInfoStep({ hasDoneReset }: { hasDoneReset: () => void }) {
         </p>
         <div className="flex gap-2">
           <button
-            onClick={() => submitFeedback("ผู้ใช้ทดลองใช้แอป NativeBridge"))
+            onClick={() => submitFeedback("ผู้ใช้ทดลองใช้แอป NativeBridge")}
             className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
           >
             ส่งความคิดเห็นสั้น
           </button>
           <button
-            onClick={() => resetTrial()}
+            onClick={() => {
+              resetTrial();
+              onReset();
+            }}
             className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
-            เริ่มทrial ใหม่
+            เริ่มทดลองใช้ใหม่
           </button>
         </div>
       </div>
@@ -313,22 +299,19 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
       setStep("need-key");
       return;
     }
-    // มี key แล้ว → ตรวจสอบว่าอยู่ในช่วงทrial หรือยัง
-    const inTrial = isInTrial();
-    const { expired, daysLeft } = getTrialExpiry();
-
-    if (inTrial && !expired) {
-      // อยู่ในทrial 90 วัน ยังไม่หมด → เข้าสู่สเต็ป ready
-      setStep("ready");
+    if (isInTrial()) {
+      const { daysLeft } = getTrialExpiry();
       setAccess({ valid: true, daysLeft });
-    } else if (!inTrial) {
-      // ไม่มีการตั้งค่าทrial (อาจเป็นการรีเซ็ตหรือยังไม่เคยเข้าใช้) → ให้ตั้งค่าทrial ใหม่
-      setTrialStart();
-      setStep("trial-info");
-    } else {
-      // ทrial หมดสิ้น → แสดงหน้าทrial-info บอกว่าหมดแล้ว
-      setStep("trial-info");
+      setStep("ready");
+      return;
     }
+    if (hasTrialStarted()) {
+      setAccess({ valid: false, daysLeft: 0 });
+      setStep("trial-info");
+      return;
+    }
+    setAccess(null);
+    setStep("need-access");
   }, []);
 
   useEffect(() => {
@@ -364,6 +347,29 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (step === "need-access") {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gradient-to-b from-slate-50 to-emerald-50 px-4 py-10">
+        <header className="text-center">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+            Native<span className="text-blue-600">Bridge</span>
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            เรียนภาษาอังกฤษแบบเจ้าของภาษา — ฟัง พูด อ่าน เขียน ครบทั้ง 4 ทักษะ
+          </p>
+        </header>
+        <TrialStep
+          onDone={() => {
+            setTrialStart();
+            const { daysLeft } = getTrialExpiry();
+            setAccess({ valid: true, daysLeft });
+            setStep("ready");
+          }}
+        />
+      </div>
+    );
+  }
+
   if (step === "trial-info") {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gradient-to-b from-slate-50 to-emerald-50 px-4 py-10">
@@ -375,26 +381,12 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
             เรียนภาษาอังกฤษแบบเจ้าของภาษา — ฟัง พูด อ่าน เขียน ครบทั้ง 4 ทักษะ
           </p>
         </header>
-        <TrialInfoStep hasDoneReset={() => setStep("need-access")} />
-      </div>
-    );
-  }
-
-  if (step === "ready") {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gradient-to-b from-slate-50 to-emerald-50 px-4 py-10">
-        <header className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-            Native<span className="text-blue-600">Bridge</span>
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {access?.daysLeft > 0 ? `เหลือเวลาอีก ${access.daysLeft} วัน` : "ใช้งานได้เต็มรูปแบบ"} — ฟัง พูด อ่าน เขียน ครบทั้ง 4 ทักษะ
-          </p>
-        </header>
-        {/* แอปหลักจะ render ผ่าน children ที่ส่งเข้าไป */}
-        <div className="w-full max-w-3xl space-y-6">
-          {children}
-        </div>
+        <TrialInfoStep
+          onReset={() => {
+            setAccess(null);
+            setStep("need-access");
+          }}
+        />
       </div>
     );
   }
@@ -409,15 +401,16 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
         title="สมาชิกและการตั้งค่า"
       >
         <CalendarClock className="h-3.5 w-3.5 text-emerald-600" />
-        {access?.daysLeft > 0 ? (
-          <p className="text-sm text-slate-600">ทrial {access.daysLeft} วันที่เหลือ</p>
+        {access && access.daysLeft > 0 ? (
+          <span>ทดลองใช้เหลือ {access.daysLeft} วัน</span>
         ) : (
-          "สมาชิก"
+          <span>สมาชิก</span>
         )}
       </button>
       {manageOpen && access && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setManageOpen(false)}
         >
           <div
             className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl"
@@ -427,34 +420,41 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
               <h3 className="flex items-center gap-2 text-base font-bold text-slate-900">
                 <CalendarClock className="h-5 w-5 text-blue-600" /> สมาชิกของคุณ
               </h3>
-              <button onClick={onClose} className="text-sm text-slate-400 hover:text-slate-600">
+              <button
+                onClick={() => setManageOpen(false)}
+                className="text-sm text-slate-400 hover:text-slate-600"
+              >
                 ปิด
               </button>
             </div>
             <div className="space-y-1 rounded-xl bg-slate-50 p-4 text-sm">
               <p className="text-slate-600">
-                เหลือเวลา: <b className="text-slate-900">{access?.daysLeft || 0} วัน</b>
+                เหลือเวลา: <b className="text-slate-900">{access.daysLeft} วัน</b>
               </p>
               <p className="font-mono text-xs text-slate-400">รหัสเครื่อง: {getDeviceId()}</p>
             </div>
             <div className="grid gap-2">
               <button
-                onClick={() => submitFeedback("ผู้ใช้ทดลองใช้แอป NativeBridge"))
+                onClick={() => submitFeedback("ผู้ใช้ทดลองใช้แอป NativeBridge")}
                 className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
               >
                 ส่งความคิดเห็นสั้น
               </button>
               <button
-                onClick={() => resetTrial()}
+                onClick={() => {
+                  resetTrial();
+                  setManageOpen(false);
+                  setAccess(null);
+                  setStep("need-access");
+                }}
                 className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
               >
-                เริ่มทrial ใหม่
+                เริ่มทดลองใช้ใหม่
               </button>
             </div>
           </div>
         </div>
-      </div>
-      </>
+      )}
     </>
   );
 }

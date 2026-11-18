@@ -30,12 +30,21 @@ export function getDeviceId(): string {
   return id;
 }
 
-/** ตั้งค่าเริ่มต้นทrial (เรียกเมื่อผู้ใช้จบขั้นตอนที่ 1) */
+/** ตั้งค่าเริ่มต้น trial (เรียกเมื่อผู้ใช้จบขั้นตอนที่ 1) */
 export function setTrialStart(): void {
   try {
     localStorage.setItem(TRIAL_START_KEY, Date.now().toString());
   } catch {
     /* ignore */
+  }
+}
+
+/** ตรวจว่าเคยเริ่ม trial แล้วหรือยัง (ใช้แยกจากกรณี trial หมดอายุ) */
+export function hasTrialStarted(): boolean {
+  try {
+    return Boolean(localStorage.getItem(TRIAL_START_KEY));
+  } catch {
+    return false;
   }
 }
 
