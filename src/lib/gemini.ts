@@ -46,7 +46,12 @@ function getClient(): GoogleGenAI {
       "ยังไม่ได้ใส่ Gemini API key — กดไอคอนรูปเฟืองเพื่อตั้งค่าก่อนใช้งาน"
     );
   }
-  return new GoogleGenAI({ apiKey });
+  // SDK v3 ใช้ v1 เป็นค่าเริ่มต้น แต่โมเดลใหม่ (gemini-4-*, TTS/Transcribe)
+  // เปิดให้ใช้ผ่าน v1beta ก่อน — บังคับ v1beta เพื่อให้เรียกโมเดลได้ครบ
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: { apiVersion: "v1beta" },
+  });
 }
 
 /** ตรวจว่า key ใช้ได้จริง (เรียก list models ไม่กินโควตา) */
@@ -96,7 +101,40 @@ function formatError(err: unknown): Error {
       "ถึงโควตาการใช้งานฟรีชั่วคราว — รอสักครู่แล้วลองใหม่อีกครั้ง"
     );
   }
+  if (
+    msg.includes("503") ||
+    msg.includes("UNAVAILABLE") ||
+    msg.toLowerCase().includes("high demand") ||
+    msg.toLowerCase().includes("overloaded")
+  ) {
+    return new Error(
+      "เซิร์ฟเวอร์โมเดลกำลังมีผู้ใช้หนาแน่น — รอ 10-20 วินาทีแล้วกดสร้างใหม่อีกครั้ง"
+    );
+  }
+  if (msg.includes("500") || msg.includes("INTERNAL")) {
+    return new Error("เซิร์ฟเวอร์โมเดลขัดข้องชั่วคราว — ลองกดสร้างใหม่อีกครั้ง");
+  }
   return new Error(msg || "เกิดข้อผิดพลาดที่ไม่คาดคิด");
+}
+
+/** แปลงข้อความ JSON จากโมเดล พร้อมข้อความ error ภาษาไทยที่อ่านรู้เรื่อง */
+function parseModelJson(
+  text: string | undefined,
+  partLabel: string
+): Record<string, any> {
+  const raw = (text ?? "").trim();
+  if (!raw) {
+    throw new Error(
+      `โมเดลไม่ได้ส่งข้อมูลกลับมา (${partLabel}) — กดสร้างใหม่อีกครั้ง`
+    );
+  }
+  try {
+    return JSON.parse(raw) as Record<string, any>;
+  } catch {
+    throw new Error(
+      `ข้อมูลจากโมเดลไม่สมบูรณ์ (${partLabel}) — กดสร้างใหม่อีกครั้ง`
+    );
+  }
 }
 
 const RANK_PEDAGOGY_GUIDE: Record<string, string> = {
@@ -520,6 +558,8 @@ Create Part 1 of this lesson (Lesson Metadata + Listening + Speaking), matching 
         systemInstruction:
           "You are an expert English curriculum designer for Thai learners. Always populate EVERY requested array with the exact item count requested (4 dialogue lines, 2 listening questions, 3 shadowing phrases). Never return empty arrays. Never use markdown asterisks (**).",
         responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        maxOutputTokens: 8192,
         responseSchema: {
           type: Type.OBJECT,
           required: [
@@ -643,6 +683,8 @@ Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of 
         systemInstruction:
           "You are an expert English curriculum designer for Thai learners. Always populate EVERY requested array with the exact item count requested (3 paragraphs, 4 expressions appearing verbatim in the paragraphs, 2 reading questions, 4 targetExpressions). Never return empty arrays. Never use markdown asterisks (**).",
         responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        maxOutputTokens: 8192,
         responseSchema: {
           type: Type.OBJECT,
           required: ["reading", "writing"],
@@ -734,10 +776,12 @@ Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of 
         },
       } as never,
     }),
-  ]);
+  ]).catch((err) => {
+    throw formatError(err);
+  });
 
-  const rawPart1 = JSON.parse((partOneRes.text ?? "{}").trim());
-  const rawPart2 = JSON.parse((partTwoRes.text ?? "{}").trim());
+  const rawPart1 = parseModelJson(partOneRes.text, "ส่วนฟังและพูด");
+  const rawPart2 = parseModelJson(partTwoRes.text, "ส่วนอ่านและเขียน");
   const raw = { ...rawPart1, ...rawPart2 };
   const lessonId = `${params.rankId}-${params.sequenceNumber}-${Date.now()}`;
   const paddedNumber = String(params.sequenceNumber).padStart(2, "0");

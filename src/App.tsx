@@ -642,7 +642,7 @@ function NativeBridge() {
                     onClick={() => handleGenerateNextInRank(selectedRankId)}
                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
                   >
-                    {isGeneratingLesson && generatingSeedNum === null ? (
+                    {isGeneratingLesson ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         <span>กำลังสร้างบทเรียนใหม่...</span>

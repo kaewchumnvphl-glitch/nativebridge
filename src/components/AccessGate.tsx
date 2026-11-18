@@ -4,6 +4,7 @@ import {
   BadgeCheck,
   CalendarClock,
   Check,
+  CheckCircle2,
   Copy,
   ExternalLink,
   Eye,
@@ -11,16 +12,20 @@ import {
   Info,
   KeyRound,
   Loader2,
+  MessageCircle,
+  Send,
 } from "lucide-react";
 import { hasApiKey, setApiKey, validateApiKey } from "../lib/gemini";
 import {
   getDeviceId,
+  getFeedback,
   setTrialStart,
   hasTrialStarted,
   isInTrial,
   getTrialExpiry,
   submitFeedback,
   resetTrial,
+  type FeedbackEntry,
 } from "../lib/access";
 
 /** สเต็ปของเกต */
@@ -52,6 +57,182 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
       {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       {copied ? "คัดลอกแล้ว" : label || "คัดลอก"}
     </button>
+  );
+}
+
+/* ================= ฟอร์มส่งความคิดเห็น ================= */
+
+function formatThaiDateTime(iso: string): string {
+  if (!iso) return "ไม่ทราบเวลา";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "ไม่ทราบเวลา";
+  return d.toLocaleString("th-TH", {
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function FeedbackForm() {
+  const [message, setMessage] = useState("");
+  const [contact, setContact] = useState("");
+  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
+  const [error, setError] = useState("");
+  const [lastEntry, setLastEntry] = useState<FeedbackEntry | null>(null);
+  const [saved, setSaved] = useState<FeedbackEntry[]>(() => getFeedback());
+  const [showSaved, setShowSaved] = useState(false);
+
+  const submit = () => {
+    const result = submitFeedback(message, contact);
+    if (!result.ok) {
+      setStatus("error");
+      setError(result.error || "ส่งความคิดเห็นไม่สำเร็จ");
+      return;
+    }
+    setStatus("success");
+    setError("");
+    setLastEntry(result.entry ?? null);
+    setSaved(getFeedback());
+    setMessage("");
+    setContact("");
+  };
+
+  const textToShare = (lastEntry?.message || message).trim();
+  const shareText = `${textToShare}\n\n— ส่งจากแอป NativeBridge`;
+  const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(shareText)}`;
+  const issueUrl = `https://github.com/kaewchumnvphl-glitch/nativebridge/issues/new?title=${encodeURIComponent(
+    "ความคิดเห็นจากผู้ใช้ NativeBridge"
+  )}&body=${encodeURIComponent(shareText)}`;
+
+  return (
+    <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+      <div>
+        <h4 className="flex items-center gap-2 text-sm font-bold text-emerald-900">
+          <MessageCircle className="h-4 w-4" /> ส่งความคิดเห็น
+        </h4>
+        <p className="mt-1 text-xs leading-relaxed text-emerald-800/80">
+          เล่าให้ฟังหน่อยว่าชอบอะไร ปัญหาที่เจอ หรืออยากให้ปรับอะไร —
+          ข้อความจะถูกบันทึกไว้ในเครื่องนี้ก่อน แล้วคุณเลือกส่งต่อให้ทีมพัฒนาได้
+        </p>
+      </div>
+
+      <textarea
+        value={message}
+        onChange={(e) => {
+          setMessage(e.target.value);
+          if (status !== "idle") setStatus("idle");
+        }}
+        rows={4}
+        maxLength={2000}
+        placeholder="ตัวอย่าง: ฟีเจอร์ฟังบทสนทนาใช้ดีมาก แต่ปุ่มสร้างบทเรียนใหม่รอนาน / เจอข้อความผิดตรงไหน..."
+        className="w-full resize-y rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <input
+          type="text"
+          value={contact}
+          onChange={(e) => setContact(e.target.value)}
+          maxLength={120}
+          placeholder="ช่องทางติดต่อ (ไม่บังคับ)"
+          className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+        />
+        <span className="text-[11px] tabular-nums text-emerald-700/70">
+          {message.length}/2000
+        </span>
+      </div>
+
+      {status === "error" && (
+        <p className="flex items-start gap-1.5 text-xs text-red-600">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {error}
+        </p>
+      )}
+
+      {status === "success" ? (
+        <div className="space-y-3 rounded-lg border border-emerald-300 bg-white p-3">
+          <p className="flex items-start gap-2 text-sm font-semibold text-emerald-700">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            บันทึกความคิดเห็นแล้ว — ขอบคุณครับ!
+          </p>
+          <p className="text-xs leading-relaxed text-slate-600">
+            ข้อความอยู่ในเครื่องนี้แล้ว หากต้องการให้ทีมพัฒนาเห็นทันที
+            เลือกช่องทางด้านล่างได้เลย
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <CopyButton text={shareText} label="คัดลอกข้อความ" />
+            <a
+              href={lineUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#06C755] px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-95"
+            >
+              <MessageCircle className="h-3.5 w-3.5" /> แชร์ผ่าน LINE
+            </a>
+            <a
+              href={issueUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> เปิด GitHub Issue
+            </a>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setStatus("idle");
+              setLastEntry(null);
+            }}
+            className="text-xs font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
+          >
+            ส่งอีกข้อความ
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!message.trim()}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Send className="h-4 w-4" /> ส่งความคิดเห็น
+        </button>
+      )}
+
+      {saved.length > 0 && (
+        <div className="border-t border-emerald-200/70 pt-2">
+          <button
+            type="button"
+            onClick={() => setShowSaved((v) => !v)}
+            className="text-xs font-semibold text-emerald-800/80 hover:text-emerald-900"
+          >
+            {showSaved ? "ซ่อน" : "ดู"}ความคิดเห็นที่บันทึกไว้ ({saved.length})
+          </button>
+          {showSaved && (
+            <ul className="mt-2 space-y-2">
+              {saved
+                .slice(-3)
+                .reverse()
+                .map((entry) => (
+                  <li
+                    key={entry.id}
+                    className="rounded-lg border border-emerald-200 bg-white p-2.5 text-xs text-slate-600"
+                  >
+                    <p className="whitespace-pre-wrap break-words">{entry.message}</p>
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      {formatThaiDateTime(entry.timestamp)}
+                      {entry.contact ? ` · ${entry.contact}` : ""}
+                    </p>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -258,29 +439,25 @@ function TrialInfoStep({ onReset }: { onReset: () => void }) {
 
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
-          <strong>เพื่อเป็นการช่วยพัฒนาแอป:</strong> หากคุณใช้แอปมารวมแล้ว โปรดใช้เวลาคลิกปุ่ม "ส่งความคิดเห็นสั้น" เพื่อบอกเราว่าใช้แล้วเป็นอย่างไรบ้าง (ฟีเจอร์ไหนชอบ ไม่ชอบ ข้อผิดพลาดเจอครับ)
+          <strong>ช่วยพัฒนาแอป:</strong> บอกเราได้เลยว่าชอบอะไร เจอปัญหาตรงไหน
+          หรืออยากให้เพิ่มฟีเจอร์อะไร — ข้อความจะถูกบันทึกไว้ในเครื่องนี้
+          และคุณเลือกส่งต่อให้ทีมพัฒนาได้
         </p>
-        <div className="flex gap-2">
-          <button
-            onClick={() => submitFeedback("ผู้ใช้ทดลองใช้แอป NativeBridge")}
-            className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
-          >
-            ส่งความคิดเห็นสั้น
-          </button>
-          <button
-            onClick={() => {
-              resetTrial();
-              onReset();
-            }}
-            className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            เริ่มทดลองใช้ใหม่
-          </button>
-        </div>
+        <FeedbackForm />
+        <button
+          type="button"
+          onClick={() => {
+            resetTrial();
+            onReset();
+          }}
+          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+        >
+          เริ่มทดลองใช้ใหม่
+        </button>
       </div>
 
       <p className="text-center text-xs text-slate-400">
-        ข้อมูลfeedback จะถูกเก็บไว้ในเครื่องของคุณและส่งให้ทีมพัฒนาเท่านั้น ไม่มีการส่งข้อมูลส่วนตัวออกไป
+        ความคิดเห็นถูกเก็บไว้ในเครื่องของคุณเท่านั้น ไม่มีการส่งข้อมูลอัตโนมัติออกไป
       </p>
     </div>
   );
@@ -413,7 +590,7 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
           onClick={() => setManageOpen(false)}
         >
           <div
-            className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -433,25 +610,18 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
               </p>
               <p className="font-mono text-xs text-slate-400">รหัสเครื่อง: {getDeviceId()}</p>
             </div>
-            <div className="grid gap-2">
-              <button
-                onClick={() => submitFeedback("ผู้ใช้ทดลองใช้แอป NativeBridge")}
-                className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
-              >
-                ส่งความคิดเห็นสั้น
-              </button>
-              <button
-                onClick={() => {
-                  resetTrial();
-                  setManageOpen(false);
-                  setAccess(null);
-                  setStep("need-access");
-                }}
-                className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                เริ่มทดลองใช้ใหม่
-              </button>
-            </div>
+            <FeedbackForm />
+            <button
+              onClick={() => {
+                resetTrial();
+                setManageOpen(false);
+                setAccess(null);
+                setStep("need-access");
+              }}
+              className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              เริ่มทดลองใช้ใหม่
+            </button>
           </div>
         </div>
       )}

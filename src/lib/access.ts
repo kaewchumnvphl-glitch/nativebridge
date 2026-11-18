@@ -78,32 +78,119 @@ export function getTrialExpiry(): { expired: boolean; daysLeft: number } {
   }
 }
 
-/** ส่งเก็บข้อความfeedback จากผู้ใช้ */
-export function submitFeedback(feedback: string): boolean {
-  try {
-    const existingStr = localStorage.getItem(FEEDBACK_KEY) || "";
-    const existing = existingStr ? JSON.parse(existingStr) : [];
-    // เก็บแค่ 5 ข้อความล่าสุด เพื่อไม่ให้ localStorage โตเกิน
-    const updated = [...existing, feedback].slice(-5).join("|||");
-    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(updated));
-    return true;
-  } catch {
-    return false;
-  }
+/** รายการความคิดเห็นหนึ่งรายการ */
+export interface FeedbackEntry {
+  id: string;
+  timestamp: string;
+  message: string;
+  contact?: string;
+  deviceId: string;
+  trialDaysLeft: number | null;
 }
 
-/** ดึงข้อมูลfeedback ที่เก็บไว้ (สำหรับแอดมินใช้ตรวจสอบ) */
-export function getFeedback(): Array<{ timestamp: string; feedback: string }> {
+const MAX_FEEDBACK_ENTRIES = 20;
+
+/** แปลงข้อมูลรุ่นเก่า (string ที่คั่นด้วย |||) ให้เป็นรายการมาตรฐาน */
+function normalizeFeedback(value: unknown): FeedbackEntry[] {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      parsed = value;
+    }
+  }
+
+  const list: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === "string"
+      ? parsed.split("|||")
+      : [];
+
+  return list.flatMap((item, index) => {
+    if (typeof item === "string") {
+      const message = item.trim();
+      if (!message) return [];
+      return [
+        {
+          id: `legacy-${index}`,
+          timestamp: "",
+          message,
+          deviceId: "",
+          trialDaysLeft: null,
+        },
+      ];
+    }
+    if (item && typeof item === "object") {
+      const obj = item as Record<string, unknown>;
+      const message =
+        typeof obj.message === "string"
+          ? obj.message
+          : typeof obj.feedback === "string"
+            ? obj.feedback
+            : "";
+      if (!message.trim()) return [];
+      return [
+        {
+          id: typeof obj.id === "string" ? obj.id : `legacy-${index}`,
+          timestamp: typeof obj.timestamp === "string" ? obj.timestamp : "",
+          message: message.trim(),
+          contact: typeof obj.contact === "string" ? obj.contact : undefined,
+          deviceId: typeof obj.deviceId === "string" ? obj.deviceId : "",
+          trialDaysLeft:
+            typeof obj.trialDaysLeft === "number" ? obj.trialDaysLeft : null,
+        },
+      ];
+    }
+    return [];
+  });
+}
+
+/** ดึงความคิดเห็นที่บันทึกไว้ในเครื่องนี้ */
+export function getFeedback(): FeedbackEntry[] {
   try {
     const data = localStorage.getItem(FEEDBACK_KEY);
     if (!data) return [];
-    const entries = JSON.parse(data);
-    return entries.map((e: string) => {
-      const [fb, ts] = e.split("|||");
-      return { feedback: fb || "", timestamp: ts || "" };
-    });
+    return normalizeFeedback(data);
   } catch {
     return [];
+  }
+}
+
+/** บันทึกความคิดเห็นจากผู้ใช้ (เก็บใน localStorage ของเครื่องนี้) */
+export function submitFeedback(
+  message: string,
+  contact?: string
+): { ok: boolean; entry?: FeedbackEntry; error?: string } {
+  const text = message.trim();
+  if (!text) {
+    return { ok: false, error: "กรุณาพิมพ์ข้อความก่อนส่ง" };
+  }
+  if (text.length > 2000) {
+    return { ok: false, error: "ข้อความยาวเกิน 2,000 ตัวอักษร" };
+  }
+
+  try {
+    const entry: FeedbackEntry = {
+      id:
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `fb-${Date.now().toString(36)}`,
+      timestamp: new Date().toISOString(),
+      message: text,
+      contact: contact?.trim() || undefined,
+      deviceId: getDeviceId(),
+      trialDaysLeft: hasTrialStarted() ? getTrialExpiry().daysLeft : null,
+    };
+    const updated = [...getFeedback(), entry].slice(-MAX_FEEDBACK_ENTRIES);
+    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(updated));
+    return { ok: true, entry };
+  } catch {
+    return {
+      ok: false,
+      error:
+        "บันทึกไม่สำเร็จ — พื้นที่เก็บข้อมูลของเบราว์เซอร์อาจเต็มหรือถูกปิด",
+    };
   }
 }
 
