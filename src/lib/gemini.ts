@@ -114,6 +114,16 @@ function formatError(err: unknown): Error {
   if (msg.includes("500") || msg.includes("INTERNAL")) {
     return new Error("เซิร์ฟเวอร์โมเดลขัดข้องชั่วคราว — ลองกดสร้างใหม่อีกครั้ง");
   }
+  if (
+    msg.includes("Failed to fetch") ||
+    msg.includes("NetworkError") ||
+    msg.includes("Load failed") ||
+    msg.includes("ERR_")
+  ) {
+    return new Error(
+      "เชื่อมต่อ Google ไม่ได้ — ตรวจอินเทอร์เน็ต ไฟร์วอลล์ หรือ VPN แล้วลองใหม่"
+    );
+  }
   return new Error(msg || "เกิดข้อผิดพลาดที่ไม่คาดคิด");
 }
 

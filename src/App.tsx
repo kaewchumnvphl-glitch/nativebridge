@@ -645,7 +645,7 @@ function NativeBridge() {
                     {isGeneratingLesson ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>กำลังสร้างบทเรียนใหม่...</span>
+                        <span>กำลังสร้างบทเรียนใหม่... (1-2 นาที)</span>
                       </>
                     ) : (
                       <>
@@ -853,7 +853,7 @@ function NativeBridge() {
                             {isThisLoading ? (
                               <>
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>กำลังสร้างบทเรียน...</span>
+                                <span>กำลังสร้างบทเรียน... (1-2 นาที)</span>
                               </>
                             ) : alreadyGenerated ? (
                               <span>เปิดเรียนบทที่ {seed.sequenceNumber}</span>

@@ -409,7 +409,7 @@ function TrialStep({ onDone }: { onDone: () => void }) {
   );
 }
 
-/* ================= หน้าข้อมูลทrial คงค้าง ================= */
+/* ================= หน้าข้อมูล trial คงค้าง ================= */
 
 function TrialInfoStep({ onReset }: { onReset: () => void }) {
   const { expired, daysLeft } = getTrialExpiry();
