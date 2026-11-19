@@ -394,7 +394,8 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
         />
         {provider.defaultModel && (
           <p className="text-[11px] text-slate-400">
-            ค่าเริ่มต้น: {provider.defaultModel} — เปลี่ยนได้หากต้องการใช้โมเดลอื่นของค่ายนี้
+            ค่าเริ่มต้น: {provider.defaultModel} — ใส่เฉพาะชื่อโมเดล เช่น gpt-5-mini
+            หรือ gemini-4-hydrogen <b className="text-amber-600">ไม่ใช่ชื่อค่าย</b> (เช่น ChatGPT) ไม่เช่นนั้นจะขึ้น HTTP 404
           </p>
         )}
       </div>

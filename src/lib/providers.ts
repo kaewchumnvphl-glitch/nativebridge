@@ -561,21 +561,6 @@ export interface GenerateJsonOptions {
   label?: string;
 }
 
-function isQuotaError(err: unknown): boolean {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return [
-    "429",
-    "resource_exhausted",
-    "quota",
-    "rate limit",
-    "too many requests",
-    "insufficient_quota",
-    "high demand",
-    "overloaded",
-    "503",
-  ].some((token) => msg.includes(token));
-}
-
 async function callJson(
   cfg: ActiveConfig,
   opts: GenerateJsonOptions,
@@ -716,8 +701,8 @@ export async function generateJson(
       return result;
     } catch (err) {
       lastError = err;
-      if (!isQuotaError(err)) throw formatApiError(err, cfg.provider.label);
-      // โควตาเต็ม → ลองค่ายถัดไป
+      // ลองค่ายถัดไปเสมอ ไม่ว่าจะโควตาเต็ม / key ผิด / CORS / 503
+      // (browser บางค่ายเชื่อมตรงไม่ได้ — ยังมี key อื่นให้ใช้ต่อ)
     }
   }
   throw formatApiError(lastError, active.provider.label);
@@ -820,7 +805,7 @@ export async function transcribeAudio(
       if (text !== null) return text;
     } catch (err) {
       lastError = err;
-      if (!isQuotaError(err)) throw formatApiError(err, cfg.provider.label);
+      // ลองค่ายถัดไปเสมอ (โควตา / key ผิด / CORS / 503)
     }
   }
   if (lastError) throw formatApiError(lastError, active.provider.label);
