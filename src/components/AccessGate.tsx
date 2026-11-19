@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import {
   PROVIDERS,
+  HIDDEN_PROVIDER_LABELS,
   getActiveConfig,
   getProviderDefinition,
   getProviderConfig,
@@ -308,9 +309,9 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
               : "ขั้นตอนที่ 1 — ใส่ API Key ของคุณ"}
           </h2>
           <p className="text-sm text-slate-500">
-            รองรับ Gemini, OpenAI, Claude, OpenRouter, Groq, DeepSeek, Mistral,
-            NVIDIA NIM, Hugging Face หรือ endpoint แบบ OpenAI-compatible — ใช้ key
-            ของตัวเอง เก็บหลายค่ายไว้ในเครื่อง สลับสำรองเมื่อโควตาเต็ม
+            รองรับ Gemini, OpenRouter, Groq, DeepSeek, Mistral, Hugging Face
+            หรือ endpoint แบบ OpenAI-compatible — ใช้ key ของตัวเอง เก็บหลายค่ายไว้ในเครื่อง
+            สลับค่ายสำรองอัตโนมัติเมื่อโควตาเต็ม
           </p>
         </div>
       </div>
@@ -352,6 +353,17 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
             </a>
           )}
         </div>
+
+        {HIDDEN_PROVIDER_LABELS.length > 0 && (
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            หมายเหตุ: ค่าย{" "}
+            <span className="font-semibold text-slate-600">
+              {HIDDEN_PROVIDER_LABELS.join(", ")}
+            </span>{" "}
+            ถูกซ่อนออกชั่วคราว เพราะ API ของค่ายนั้นไม่เปิดให้ browser เรียกโดยตรง
+            (CORS) — จะเปิดใช้อีกครั้งเมื่อมี backend ของตัวเอง
+          </p>
+        )}
       </div>
 
       <div className="space-y-2">

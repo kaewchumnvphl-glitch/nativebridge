@@ -33,9 +33,15 @@ export interface ProviderDefinition {
   /** โมเดลสำหรับ /audio/transcriptions (เฉพาะค่ายที่รองรับ) */
   transcriptionModel?: string;
   ttsNoteThai?: string;
+  /**
+   * true = API ไม่เปิด CORS ให้ browser เรียกโดยตรง
+   * (static site ไม่มี backend จึงใช้ค่ายนี้ไม่ได้) — จะถูกซ่อนออกจากรายการเลือก
+   * เปิดกลับได้เมื่อมี proxy/backend เป็นของตัวเอง
+   */
+  browserUnsupported?: boolean;
 }
 
-export const PROVIDERS: ProviderDefinition[] = [
+const ALL_PROVIDERS: ProviderDefinition[] = [
   {
     id: "gemini",
     label: "Google Gemini",
@@ -61,6 +67,7 @@ export const PROVIDERS: ProviderDefinition[] = [
     allowBaseUrlEdit: false,
     transcriptionModel: "whisper-1",
     ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์คุณภาพสูง",
+    browserUnsupported: true,
   },
   {
     id: "anthropic",
@@ -74,6 +81,7 @@ export const PROVIDERS: ProviderDefinition[] = [
       "ล็อกอิน Anthropic Console → Settings → API Keys → Create Key (ขึ้นต้น sk-ant-)",
     allowBaseUrlEdit: false,
     ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์และการถอดเสียง",
+    browserUnsupported: true,
   },
   {
     id: "openrouter",
@@ -137,6 +145,7 @@ export const PROVIDERS: ProviderDefinition[] = [
       "ล็อกอิน NVIDIA NGC → build.nvidia.com → Settings → API Keys (ขึ้นต้น nvapi-)",
     allowBaseUrlEdit: false,
     ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์คุณภาพสูง",
+    browserUnsupported: true,
   },
   {
     id: "huggingface",
@@ -165,6 +174,19 @@ export const PROVIDERS: ProviderDefinition[] = [
     ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์คุณภาพสูง",
   },
 ];
+
+/**
+ * ค่ายที่ใช้ได้จริงจาก browser (server ของค่ายนั้นเปิด CORS ให้)
+ * ค่ายที่ `browserUnsupported` จะถูกซ่อนออกจากรายการเลือก
+ */
+export const PROVIDERS: ProviderDefinition[] = ALL_PROVIDERS.filter(
+  (p) => !p.browserUnsupported
+);
+
+/** ชื่อค่ายที่ถูกซ่อน (browser เรียกตรงไม่ได้) ใช้แสดงคำเตือน */
+export const HIDDEN_PROVIDER_LABELS: string[] = ALL_PROVIDERS.filter(
+  (p) => Boolean(p.browserUnsupported)
+).map((p) => p.label);
 
 const PROVIDER_MAP = Object.fromEntries(
   PROVIDERS.map((p) => [p.id, p])
