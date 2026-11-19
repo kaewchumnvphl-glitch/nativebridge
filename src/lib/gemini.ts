@@ -12,7 +12,7 @@ import {
   clearApiKey,
   hasApiKey,
   getGeminiClient,
-  getElevenLabsKey,
+  isElevenLabsAvailable,
   apiElevenLabsTts,
   generateJson,
   transcribeAudio,
@@ -116,7 +116,7 @@ export async function apiTts(
 
   // ใช้ ElevenLabs ก่อนเมื่อมี key (ประหยัดโควตาเสียง Gemini)
   // ถ้า ElevenLabs ไม่สำเร็จหรือไม่มี key → ใช้ Gemini ตามเดิม
-  if (getElevenLabsKey()) {
+  if (isElevenLabsAvailable()) {
     try {
       const spokenText = isDialogue
         ? params.multiSpeaker!.map((l) => `${l.speaker}: ${l.text}`).join("\n")

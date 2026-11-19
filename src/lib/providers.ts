@@ -831,13 +831,21 @@ export async function transcribeAudio(
 
 /* ================= ElevenLabs TTS (ประหยัดโควตา Gemini) ================= */
 
+/** ถ้า key ถูกปฏิเสธ (auth/payment) จะข้าม ElevenLabs ตลอด session นี้ */
+let elevenLabsDisabled = false;
+
+export function isElevenLabsAvailable(): boolean {
+  return !elevenLabsDisabled && Boolean(getElevenLabsKey());
+}
+
 export async function apiElevenLabsTts(params: {
   text: string;
   style?: string;
 }): Promise<{ audioBase64: string; mimeType: string }> {
   const key = getElevenLabsKey();
   if (!key) throw new Error("ยังไม่ได้ใส่ ElevenLabs key");
-  const voiceId = "21m00Tcm4TlvDq8ikWAM"; // Rachel — natural US English
+  // Bella — ใช้ได้กับบัญชี ElevenLabs แบบฟรี (voice ibrary หลายตัวต้องใช้แพ็กเกจเสียเงิน)
+  const voiceId = "EXAVITQu4vr4xnSDxMaL";
   const response = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
     {
@@ -856,6 +864,7 @@ export async function apiElevenLabsTts(params: {
   );
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 200);
+    if ([401, 402, 403].includes(response.status)) elevenLabsDisabled = true;
     throw new Error(`HTTP ${response.status}: ${detail}`);
   }
   const bytes = new Uint8Array(await response.arrayBuffer());
