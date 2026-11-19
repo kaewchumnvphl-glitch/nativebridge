@@ -435,6 +435,8 @@ Avoid duplicating these previous lesson titles: ${(params.avoidTitles || []).sli
   const RETRY_NOTE =
     "⚠️ โปรดตอบครบและตรงตามจำนวนที่ระบุ — ห้ามลดจำนวนรายการ ไม่เว้นช่องว่าง";
   for (let attempt = 0; attempt < 3; attempt++) {
+  let raw: Record<string, any>;
+  try {
   const [rawPart1, rawPart2] = await Promise.all([
     generateJson({
       prompt: `${attempt > 0 ? sharedBrief + "\n\n" + RETRY_NOTE : sharedBrief}
@@ -666,7 +668,12 @@ Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of 
     throw formatError(err);
   });
 
-  const raw = { ...rawPart1, ...rawPart2 };
+  raw = { ...rawPart1, ...rawPart2 };
+  } catch (err) {
+    // generation ตัวเองผิดพลาด (503 high demand, network...) → ลองครั้งต่อไป
+    if (attempt >= 2) throw err;
+    continue;
+  }
   const lessonId = `${params.rankId}-${params.sequenceNumber}-${Date.now()}`;
   const paddedNumber = String(params.sequenceNumber).padStart(2, "0");
 
