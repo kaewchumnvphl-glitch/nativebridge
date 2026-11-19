@@ -254,7 +254,8 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
   const [providerId, setSelectedProvider] = useState<ProviderId>(
     initial.provider.id
   );
-  const [key, setKey] = useState("");
+  // เติม key ที่บันทึกไว้ของค่ายที่กำลังใช้งาน เพื่อให้ปุ่มบันทึกกดได้ทันที
+  const [key, setKey] = useState(initial.key || "");
   const [model, setModel] = useState(
     initial.model === initial.provider.defaultModel ? "" : initial.model
   );
