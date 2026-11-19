@@ -20,6 +20,7 @@ import {
   getActiveConfig,
   getProviderDefinition,
   getMaskedKey,
+  hasApiKey,
   setProviderId,
   setApiKey,
   setModelOverride,
