@@ -431,9 +431,13 @@ Main Tutor: ${t.name} (${t.city})
 Dialogue Partner: ${t.partnerName}
 Avoid duplicating these previous lesson titles: ${(params.avoidTitles || []).slice(-15).join(" | ") || "None"}`;
 
+  // เมื่อ Gemini ส่งข้อมูลไม่ครบรายการ (ข้อความ "บทเรียนที่สร้างไม่สมบูรณ์") จะ retry สูงถึง 3 ครั้ง
+  const RETRY_NOTE =
+    "⚠️ โปรดตอบครบและตรงตามจำนวนที่ระบุ — ห้ามลดจำนวนรายการ ไม่เว้นช่องว่าง";
+  for (let attempt = 0; attempt < 3; attempt++) {
   const [rawPart1, rawPart2] = await Promise.all([
     generateJson({
-      prompt: `${sharedBrief}
+      prompt: `${attempt > 0 ? sharedBrief + "\n\n" + RETRY_NOTE : sharedBrief}
 
 Create Part 1 of this lesson (Lesson Metadata + Listening + Speaking), matching the EXACT quality of our curated lessons:
 1. titleEn, titleThai (concise natural Thai, no numbering), summaryThai (1-2 Thai sentences), culturalInsightThai (1-2 Thai sentences), durationMinutes (12-18).
@@ -555,7 +559,7 @@ Create Part 1 of this lesson (Lesson Metadata + Listening + Speaking), matching 
         },
     }),
     generateJson({
-      prompt: `${sharedBrief}
+      prompt: `${attempt > 0 ? sharedBrief + "\n\n" + RETRY_NOTE : sharedBrief}
 
 Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of our curated lessons:
 1. reading.formatLabel (e.g. "Neighborhood Note", "Chat Thread", "Travel Sign"), reading.headline, reading.authorMeta ("${t.name} · ${t.city} · 2 min read").
@@ -926,12 +930,14 @@ Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of 
     hydratedLesson.reading.questions.length < 2 ||
     hydratedLesson.writing.targetExpressions.length < 2
   ) {
+    if (attempt < 2) continue;
     throw formatError(
       "เนื้อหาบทเรียนที่สร้างไม่สมบูรณ์ กรุณาลองกดสร้างใหม่อีกครั้ง"
     );
   }
 
   return { lesson: hydratedLesson as Lesson };
+  }
 }
 
 /* ============================================================
