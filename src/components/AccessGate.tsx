@@ -15,7 +15,18 @@ import {
   MessageCircle,
   Send,
 } from "lucide-react";
-import { hasApiKey, setApiKey, validateApiKey } from "../lib/gemini";
+import {
+  PROVIDERS,
+  getActiveConfig,
+  getProviderDefinition,
+  getMaskedKey,
+  setProviderId,
+  setApiKey,
+  setModelOverride,
+  setBaseUrlOverride,
+  validateProviderKey,
+  type ProviderId,
+} from "../lib/providers";
 import {
   getDeviceId,
   getFeedback,
@@ -239,19 +250,44 @@ function FeedbackForm() {
 /* ================= ขั้นที่ 1: ใส่ API key (เหมือนเดิม) ================= */
 
 function ApiKeyStep({ onDone }: { onDone: () => void }) {
+  const initial = getActiveConfig();
+  const [providerId, setSelectedProvider] = useState<ProviderId>(
+    initial.provider.id
+  );
   const [key, setKey] = useState("");
+  const [model, setModel] = useState(
+    initial.model === initial.provider.defaultModel ? "" : initial.model
+  );
+  const [baseUrl, setBaseUrl] = useState(
+    initial.provider.allowBaseUrlEdit ? initial.baseUrl : ""
+  );
   const [showKey, setShowKey] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const provider = getProviderDefinition(providerId);
+  const currentMasked = getMaskedKey();
+
+  const changeProvider = (id: ProviderId) => {
+    const def = getProviderDefinition(id);
+    setSelectedProvider(id);
+    setKey("");
+    setError(null);
+    setModel("");
+    setBaseUrl(def.allowBaseUrlEdit ? def.baseUrl : "");
+  };
 
   const submit = async () => {
     const trimmed = key.trim();
     if (!trimmed || checking) return;
     setChecking(true);
     setError(null);
-    const result = await validateApiKey(trimmed);
+    const result = await validateProviderKey(trimmed, providerId, baseUrl);
     if (result.ok) {
+      setProviderId(providerId);
       setApiKey(trimmed);
+      setModelOverride(model);
+      setBaseUrlOverride(baseUrl);
       onDone();
     } else {
       setError(result.errorThai || "ตรวจสอบ key ไม่ผ่าน");
@@ -266,45 +302,68 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
           <KeyRound className="h-5 w-5" />
         </div>
         <div>
-          <h2 className="text-lg font-bold text-slate-900">ขั้นตอนที่ 1 — ใส่ Gemini API Key ของคุณ</h2>
-          <p className="text-sm text-slate-500">ใช้ key ของตัวเอง คุมโควตาเอง แอปไม่มีการส่ง key ไปเก็บที่เซิร์ฟเวอร์ใด ๆ</p>
+          <h2 className="text-lg font-bold text-slate-900">
+            {currentMasked
+              ? "ตั้งค่า API Key ของคุณ"
+              : "ขั้นตอนที่ 1 — ใส่ API Key ของคุณ"}
+          </h2>
+          <p className="text-sm text-slate-500">
+            รองรับ Gemini, OpenAI, Claude, OpenRouter, Groq, DeepSeek, Mistral
+            หรือ endpoint แบบ OpenAI-compatible — ใช้ key ของตัวเอง คุมโควตาเอง
+          </p>
         </div>
       </div>
 
-      <ol className="space-y-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-        <li className="flex gap-2">
-          <span className="font-bold text-blue-600">1.</span>
-          <span>
-            เปิด{" "}
+      {currentMasked && (
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          Key ปัจจุบัน: <span className="font-mono">{currentMasked}</span> (
+          {getProviderDefinition().label}) — หากต้องการเปลี่ยน ให้เลือกค่ายใหม่ด้านล่างแล้วใส่ key อันใหม่
+        </p>
+      )}
+
+      <div className="space-y-3 rounded-xl bg-slate-50 p-4">
+        <label className="block text-sm font-semibold text-slate-700">
+          ผู้ให้บริการ AI
+          <select
+            value={providerId}
+            onChange={(e) => changeProvider(e.target.value as ProviderId)}
+            className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          >
+            {PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="rounded-lg border border-blue-100 bg-blue-50/70 p-3 text-xs leading-relaxed text-blue-900">
+          <p>{provider.helpThai}</p>
+          {provider.docsUrl && (
             <a
-              href="https://aistudio.google.com/apikey"
+              href={provider.docsUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 font-semibold text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
+              className="mt-1 inline-flex items-center gap-1 font-semibold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800"
             >
-              aistudio.google.com/apikey <ExternalLink className="h-3.5 w-3.5" />
-            </a>{" "}
-            แล้วล็อกอินด้วยบัญชี Google
-          </span>
-        </li>
-        <li className="flex gap-2">
-          <span className="font-bold text-blue-600">2.</span>
-          <span>กด “Create API key” แล้วคัดลอก key (เริ่มด้วย AIza…)</span>
-        </li>
-        <li className="flex gap-2">
-          <span className="font-bold text-blue-600">3.</span>
-          <span>วาง key ในช่องด้านล่าง — เก็บไว้ในเครื่องคุณเท่านั้น</span>
-        </li>
-      </ol>
+              เปิดหน้าสร้าง API key ของ {provider.label}{" "}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
+      </div>
 
       <div className="space-y-2">
+        <label className="block text-sm font-semibold text-slate-700">
+          API key
+        </label>
         <div className="flex items-center gap-2">
           <input
             type={showKey ? "text" : "password"}
             value={key}
             onChange={(e) => setKey(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
-            placeholder="AIza..."
+            placeholder={provider.keyHint}
             autoFocus
             spellCheck={false}
             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
@@ -318,18 +377,67 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
             {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
-        {error && (
-          <p className="flex items-start gap-2 text-sm text-red-600">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            {error}
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="block text-sm font-semibold text-slate-700">
+          ชื่อโมเดล <span className="font-normal text-slate-400">(ไม่บังคับ)</span>
+        </label>
+        <input
+          type="text"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder={provider.defaultModel || "เช่น gpt-4o-mini"}
+          spellCheck={false}
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-mono text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        />
+        {provider.defaultModel && (
+          <p className="text-[11px] text-slate-400">
+            ค่าเริ่มต้น: {provider.defaultModel} — เปลี่ยนได้หากต้องการใช้โมเดลอื่นของค่ายนี้
           </p>
         )}
       </div>
 
+      {provider.allowBaseUrlEdit && (
+        <div className="space-y-1.5">
+          <label className="block text-sm font-semibold text-slate-700">
+            Base URL <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="url"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="https://api.example.com/v1"
+            spellCheck={false}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-mono text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          />
+          <p className="text-[11px] text-slate-400">
+            ต้องเป็น endpoint แบบ OpenAI-compatible (มี /chat/completions)
+          </p>
+        </div>
+      )}
+
+      {provider.ttsNoteThai && (
+        <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {provider.ttsNoteThai} ฟังก์ชันอ่านออกเสียงจะใช้เสียงของเบราว์เซอร์แทน
+          {provider.id !== "openai" && provider.id !== "groq" && provider.id !== "custom"
+            ? " และการถอดเสียงจากไมโครโฟนยังต้องใช้ Gemini / OpenAI / Groq"
+            : ""}
+        </p>
+      )}
+
+      {error && (
+        <p className="flex items-start gap-2 text-sm text-red-600">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          {error}
+        </p>
+      )}
+
       <button
         type="button"
         onClick={submit}
-        disabled={!key.trim() || checking}
+        disabled={!key.trim() || checking || (provider.allowBaseUrlEdit && !baseUrl.trim())}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {checking ? (
@@ -342,7 +450,8 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
       </button>
 
       <p className="text-center text-xs text-slate-400">
-        Key ของคุณถูกเก็บในเบราว์เซอร์ของคุณเอง (localStorage) เท่านั้น
+        Key ของคุณถูกเก็บในเบราว์เซอร์ของคุณเอง (localStorage) เท่านั้น —
+        แอปไม่มีเซิร์ฟเวอร์รับ key
       </p>
     </div>
   );
@@ -371,7 +480,7 @@ function TrialStep({ onDone }: { onDone: () => void }) {
         <ol className="space-y-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
           <li>
             <span className="font-bold text-blue-600">1.</span>{" "}
-            <span>กรอก Gemini API Key ของคุณแล้วผ่านขั้นตอนที่ 1 ไปแล้ว</span>
+            <span>กรอก API Key ของผู้ให้บริการที่คุณเลือก แล้วผ่านขั้นตอนที่ 1 ไปแล้ว</span>
           </li>
           <li>
             <span className="font-bold text-blue-600">2.</span>{" "}
@@ -469,6 +578,7 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
   const [step, setStep] = useState<GateStep>("checking");
   const [access, setAccess] = useState<{ valid: boolean; daysLeft: number } | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
+  const [changingKey, setChangingKey] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const check = useCallback(async () => {
@@ -517,7 +627,8 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
         <ApiKeyStep
           onDone={() => {
             setNotice(null);
-            setStep("need-access");
+            setStep(changingKey ? "ready" : "need-access");
+            setChangingKey(false);
           }}
         />
       </div>
@@ -608,8 +719,22 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
               <p className="text-slate-600">
                 เหลือเวลา: <b className="text-slate-900">{access.daysLeft} วัน</b>
               </p>
+              <p className="text-slate-600">
+                ผู้ให้บริการ AI:{" "}
+                <b className="text-slate-900">{getProviderDefinition().label}</b>
+              </p>
               <p className="font-mono text-xs text-slate-400">รหัสเครื่อง: {getDeviceId()}</p>
             </div>
+            <button
+              onClick={() => {
+                setManageOpen(false);
+                setChangingKey(true);
+                setStep("need-key");
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+            >
+              <KeyRound className="h-4 w-4" /> เปลี่ยน API key / ผู้ให้บริการ
+            </button>
             <FeedbackForm />
             <button
               onClick={() => {

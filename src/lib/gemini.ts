@@ -1,8 +1,4 @@
-import {
-  GoogleGenAI,
-  Type,
-  ThinkingLevel,
-} from "@google/genai";
+import { Type } from "@google/genai";
 import type {
   Lesson,
   PromotionExam,
@@ -10,141 +6,47 @@ import type {
   TutorId,
   WritingEvaluation,
 } from "../types/lesson";
+import {
+  getApiKey,
+  setApiKey,
+  clearApiKey,
+  hasApiKey,
+  getGeminiClient,
+  generateJson,
+  transcribeAudio,
+  validateProviderKey,
+  formatApiError as formatError,
+  type ProviderId,
+} from "./providers";
 
 /**
- * BYOK (Bring Your Own Key) Gemini client.
- * ผู้ใช้ใส่ Gemini API key ของตัวเอง (เก็บไว้ใน localStorage ของเครื่องผู้ใช้เท่านั้น)
- * ทุกฟังก์ชันนี้พอร์ตมาจาก server.ts ของ AI Studio เดิมแบบเนื้อหาเดียวกันทุกประโยค
+ * BYOK (Bring Your Own Key) — รองรับหลายค่ายผ่าน lib/providers.ts
+ * ผู้ใช้ใส่ key ของตัวเอง (เก็บไว้ใน localStorage ของเครื่องผู้ใช้เท่านั้น)
+ * เนื้อหาคำสั่งและโครงสร้างบทเรียนเหมือนฉบับเดิมทุกประโยค
  */
 
-const API_KEY_STORAGE = "nativebridge_api_key_v1";
-
-export function getApiKey(): string | null {
-  try {
-    return localStorage.getItem(API_KEY_STORAGE) || null;
-  } catch {
-    return null;
-  }
-}
-
-export function setApiKey(key: string) {
-  localStorage.setItem(API_KEY_STORAGE, key.trim());
-}
-
-export function clearApiKey() {
-  localStorage.removeItem(API_KEY_STORAGE);
-}
-
-export function hasApiKey(): boolean {
-  return Boolean(getApiKey());
-}
-
-function getClient(): GoogleGenAI {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error(
-      "ยังไม่ได้ใส่ Gemini API key — กดไอคอนรูปเฟืองเพื่อตั้งค่าก่อนใช้งาน"
-    );
-  }
-  // SDK v3 ใช้ v1 เป็นค่าเริ่มต้น แต่โมเดลใหม่ (gemini-4-*, TTS/Transcribe)
-  // เปิดให้ใช้ผ่าน v1beta ก่อน — บังคับ v1beta เพื่อให้เรียกโมเดลได้ครบ
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: { apiVersion: "v1beta" },
-  });
-}
+export {
+  getApiKey,
+  setApiKey,
+  clearApiKey,
+  hasApiKey,
+};
 
 /** ตรวจว่า key ใช้ได้จริง (เรียก list models ไม่กินโควตา) */
 export async function validateApiKey(
-  key: string
+  key: string,
+  providerId: ProviderId = "gemini",
+  baseUrl?: string
 ): Promise<{ ok: boolean; errorThai?: string }> {
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key.trim())}`,
-      { method: "GET" }
-    );
-    if (res.ok) return { ok: true };
-    if (res.status === 400 || res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        errorThai:
-          "API key ไม่ถูกต้อง — ตรวจสอบว่าคัดลอกครบและสมัครที่ aistudio.google.com/apikey",
-      };
-    }
-    return {
-      ok: false,
-      errorThai: `เชื่อมต่อ Google ไม่สำเร็จ (HTTP ${res.status}) — ลองใหม่อีกครั้ง`,
-    };
-  } catch {
-    return {
-      ok: false,
-      errorThai: "อินเทอร์เน็ตมีปัญหา — เชื่อมต่อเครือข่ายแล้วลองใหม่",
-    };
-  }
+  return validateProviderKey(key, providerId, baseUrl);
 }
 
-function formatError(err: unknown): Error {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (
-    msg.includes("401") ||
-    msg.includes("403") ||
-    msg.includes("PERMISSION_DENIED") ||
-    msg.includes("API_KEY_INVALID") ||
-    msg.includes("API key not valid")
-  ) {
-    return new Error(
-      "API key ไม่ถูกต้องหรือหมดอายุ — กดไอคอนรูปเฟืองเพื่ออัปเดต key"
-    );
-  }
-  if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
-    return new Error(
-      "ถึงโควตาการใช้งานฟรีชั่วคราว — รอสักครู่แล้วลองใหม่อีกครั้ง"
-    );
-  }
-  if (
-    msg.includes("503") ||
-    msg.includes("UNAVAILABLE") ||
-    msg.toLowerCase().includes("high demand") ||
-    msg.toLowerCase().includes("overloaded")
-  ) {
-    return new Error(
-      "เซิร์ฟเวอร์โมเดลกำลังมีผู้ใช้หนาแน่น — รอ 10-20 วินาทีแล้วกดสร้างใหม่อีกครั้ง"
-    );
-  }
-  if (msg.includes("500") || msg.includes("INTERNAL")) {
-    return new Error("เซิร์ฟเวอร์โมเดลขัดข้องชั่วคราว — ลองกดสร้างใหม่อีกครั้ง");
-  }
-  if (
-    msg.includes("Failed to fetch") ||
-    msg.includes("NetworkError") ||
-    msg.includes("Load failed") ||
-    msg.includes("ERR_")
-  ) {
-    return new Error(
-      "เชื่อมต่อ Google ไม่ได้ — ตรวจอินเทอร์เน็ต ไฟร์วอลล์ หรือ VPN แล้วลองใหม่"
-    );
-  }
-  return new Error(msg || "เกิดข้อผิดพลาดที่ไม่คาดคิด");
-}
-
-/** แปลงข้อความ JSON จากโมเดล พร้อมข้อความ error ภาษาไทยที่อ่านรู้เรื่อง */
-function parseModelJson(
-  text: string | undefined,
-  partLabel: string
-): Record<string, any> {
-  const raw = (text ?? "").trim();
-  if (!raw) {
-    throw new Error(
-      `โมเดลไม่ได้ส่งข้อมูลกลับมา (${partLabel}) — กดสร้างใหม่อีกครั้ง`
-    );
-  }
-  try {
-    return JSON.parse(raw) as Record<string, any>;
-  } catch {
-    throw new Error(
-      `ข้อมูลจากโมเดลไม่สมบูรณ์ (${partLabel}) — กดสร้างใหม่อีกครั้ง`
-    );
-  }
+export async function validateKey(
+  key: string,
+  providerId: ProviderId,
+  baseUrl?: string
+) {
+  return validateProviderKey(key, providerId, baseUrl);
 }
 
 const RANK_PEDAGOGY_GUIDE: Record<string, string> = {
@@ -207,7 +109,8 @@ export interface TtsRequest {
 export async function apiTts(
   params: TtsRequest
 ): Promise<{ audioBase64: string; mimeType: string }> {
-  const ai = getClient();
+  // TTS ใช้ Gemini โดยตรง — ค่ายอื่น audio.ts จะ fallback ไป speechSynthesis
+  const ai = getGeminiClient();
 
   if (Array.isArray(params.multiSpeaker) && params.multiSpeaker.length === 2) {
     const response = await ai.models.generateContent({
@@ -291,25 +194,11 @@ export async function apiTranscribe(params: {
   audioBase64: string;
   mimeType?: string;
 }): Promise<{ transcript: string }> {
-  const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: "gemini-3.5-transcribe",
-    contents: {
-      parts: [
-        {
-          inlineData: {
-            mimeType: params.mimeType || "audio/webm",
-            data: params.audioBase64,
-          },
-        },
-        {
-          text: "Transcribe the spoken English accurately. Return only the spoken words without extra commentary.",
-        },
-      ],
-    },
+  const transcript = await transcribeAudio({
+    audioBase64: params.audioBase64,
+    mimeType: params.mimeType,
   });
-
-  return { transcript: (response.text ?? "").trim() };
+  return { transcript };
 }
 
 /* ============================================================
@@ -330,53 +219,34 @@ export async function apiTranscribeCoach(params: {
   targetPhrase: string;
   contextThai?: string;
 }): Promise<CoachFeedback> {
-  const ai = getClient();
-
-  const transcribeResponse = await ai.models.generateContent({
-    model: "gemini-3.5-transcribe",
-    contents: {
-      parts: [
-        {
-          inlineData: {
-            mimeType: params.mimeType || "audio/webm",
-            data: params.audioBase64,
-          },
-        },
-        {
-          text: "Transcribe the learner's English speech verbatim. Return only the transcribed text.",
-        },
-      ],
-    },
+  const spokenText = await transcribeAudio({
+    audioBase64: params.audioBase64,
+    mimeType: params.mimeType,
+    prompt:
+      "Transcribe the learner's English speech verbatim. Return only the transcribed text.",
   });
 
-  const spokenText = (transcribeResponse.text ?? "").trim();
-
-  const coachResponse = await ai.models.generateContent({
-    model: "gemini-4-hydrogen",
-    contents: `Target native phrase: "${params.targetPhrase}"
+  const parsed = await generateJson({
+    systemInstruction:
+      "You are a warm, observant native English pronunciation coach teaching a Thai learner. Compare the transcribed speech with the target phrase. Give practical advice in Thai about word stress, linking/connected speech, final consonants (-s, -ed, -t, -d), or rhythm. Be encouraging and concise.",
+    prompt: `Target native phrase: "${params.targetPhrase}"
 Context (Thai): ${params.contextThai || "Everyday conversation"}
 What the Thai learner actually said (transcribed): "${spokenText || "(silence / unclear)"}"
 
 Evaluate the learner's spoken attempt kindly and concretely like a real native tutor coaching a Thai speaker.`,
-    config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      systemInstruction:
-        "You are a warm, observant native English pronunciation coach teaching a Thai learner. Compare the transcribed speech with the target phrase. Give practical advice in Thai about word stress, linking/connected speech, final consonants (-s, -ed, -t, -d), or rhythm. Be encouraging and concise.",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          accuracyScore: { type: Type.INTEGER },
-          heardText: { type: Type.STRING },
-          feedbackThai: { type: Type.STRING },
-          focusTipThai: { type: Type.STRING },
-          passed: { type: Type.BOOLEAN },
-        },
+    schema: {
+      type: Type.OBJECT,
+      properties: {
+        accuracyScore: { type: Type.INTEGER },
+        heardText: { type: Type.STRING },
+        feedbackThai: { type: Type.STRING },
+        focusTipThai: { type: Type.STRING },
+        passed: { type: Type.BOOLEAN },
       },
-    } as never,
+    },
+    thinkingLevel: "LOW",
+    label: "ผลประเมินการออกเสียง",
   });
-
-  const parsed = JSON.parse((coachResponse.text ?? "{}").trim());
   return {
     accuracyScore: parsed.accuracyScore ?? 0,
     heardText: spokenText || parsed.heardText || "",
@@ -416,7 +286,6 @@ export async function apiRoleplay(params: {
     throw formatError("userMessage is required.");
   }
 
-  const ai = getClient();
   const conversationLog = (params.history || [])
     .slice(-10)
     .map(
@@ -425,9 +294,10 @@ export async function apiRoleplay(params: {
     )
     .join("\n");
 
-  const response = await ai.models.generateContent({
-    model: "gemini-4-hydrogen",
-    contents: `Tutor Persona: ${params.tutorName} from ${params.tutorCity}. Speaking style: ${params.tutorStyle}.
+  const parsed = await generateJson({
+    systemInstruction:
+      "You are a friendly native English speaker having a real-life conversation with a Thai learner. Speak like a real local, never like a robotic textbook. Also coach them subtly by showing how a native speaker might phrase their sentence even more naturally.",
+    prompt: `Tutor Persona: ${params.tutorName} from ${params.tutorCity}. Speaking style: ${params.tutorStyle}.
 Roleplay Scenario: ${params.scenarioTitle} — ${params.scenarioPrompt}
 
 Conversation so far:
@@ -435,34 +305,28 @@ ${conversationLog || "(Start of conversation)"}
 Learner just said: "${params.userMessage.trim()}"
 
 Respond in character as ${params.tutorName}. Keep the reply natural, engaging, and 1–3 sentences long. Also give a gentle Native Upgrade on what the learner just said.`,
-    config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      systemInstruction:
-        "You are a friendly native English speaker having a real-life conversation with a Thai learner. Speak like a real local, never like a robotic textbook. Also coach them subtly by showing how a native speaker might phrase their sentence even more naturally.",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          tutorReply: { type: Type.STRING },
-          tutorReplyThai: { type: Type.STRING },
-          nativeUpgrade: {
-            type: Type.OBJECT,
-            properties: {
-              isAlreadyNatural: { type: Type.BOOLEAN },
-              naturalVersion: { type: Type.STRING },
-              whyThai: { type: Type.STRING },
-            },
-          },
-          suggestedReplies: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
+    schema: {
+      type: Type.OBJECT,
+      properties: {
+        tutorReply: { type: Type.STRING },
+        tutorReplyThai: { type: Type.STRING },
+        nativeUpgrade: {
+          type: Type.OBJECT,
+          properties: {
+            isAlreadyNatural: { type: Type.BOOLEAN },
+            naturalVersion: { type: Type.STRING },
+            whyThai: { type: Type.STRING },
           },
         },
+        suggestedReplies: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+        },
       },
-    } as never,
+    },
+    thinkingLevel: "LOW",
+    label: "บทสนทนาจำลอง",
   });
-
-  const parsed = JSON.parse((response.text ?? "{}").trim());
   return parsed as RoleplayResponse;
 }
 
@@ -480,11 +344,10 @@ export async function apiEvaluateWriting(params: {
     throw formatError("Writing text is required.");
   }
 
-  const ai = getClient();
-
-  const response = await ai.models.generateContent({
-    model: "gemini-4-hydrogen",
-    contents: `Writing Task: ${params.promptTitle}
+  const parsed = await generateJson({
+    systemInstruction:
+      "You are a native English writing coach for Thai learners. Preserve the learner's intended meaning while elevating their phrasing from translated-from-Thai English to truly natural native English. Explain nuances clearly in Thai.",
+    prompt: `Writing Task: ${params.promptTitle}
 Task Instructions: ${params.promptInstruction}
 Recommended Native Expressions: ${(params.targetExpressions || []).join(", ") || "Natural everyday phrasing"}
 
@@ -494,36 +357,30 @@ ${params.userText.trim()}
 """
 
 Review this English draft as a supportive native English editor coaching a Thai learner.`,
-    config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
-      systemInstruction:
-        "You are a native English writing coach for Thai learners. Preserve the learner's intended meaning while elevating their phrasing from translated-from-Thai English to truly natural native English. Explain nuances clearly in Thai.",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          naturalnessScore: { type: Type.INTEGER },
-          strengthsThai: { type: Type.STRING },
-          casualNativeRewrite: { type: Type.STRING },
-          polishedNativeRewrite: { type: Type.STRING },
-          keyUpgrades: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                original: { type: Type.STRING },
-                improved: { type: Type.STRING },
-                explanationThai: { type: Type.STRING },
-              },
+    schema: {
+      type: Type.OBJECT,
+      properties: {
+        naturalnessScore: { type: Type.INTEGER },
+        strengthsThai: { type: Type.STRING },
+        casualNativeRewrite: { type: Type.STRING },
+        polishedNativeRewrite: { type: Type.STRING },
+        keyUpgrades: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              original: { type: Type.STRING },
+              improved: { type: Type.STRING },
+              explanationThai: { type: Type.STRING },
             },
           },
-          grammarAndToneTipThai: { type: Type.STRING },
         },
+        grammarAndToneTipThai: { type: Type.STRING },
       },
-    } as never,
+    },
+    thinkingLevel: "MEDIUM",
+    label: "ผลประเมินการเขียน",
   });
-
-  const parsed = JSON.parse((response.text ?? "{}").trim());
   return parsed as WritingEvaluation;
 }
 
@@ -540,7 +397,6 @@ export async function apiGenerateLesson(params: {
   tutorId: TutorId;
   avoidTitles?: string[];
 }): Promise<{ lesson: Lesson }> {
-  const ai = getClient();
   const t = TUTOR_META[params.tutorId] || TUTOR_META.maya;
   const pedagogy = RANK_PEDAGOGY_GUIDE[params.rankId] || RANK_PEDAGOGY_GUIDE.A1;
 
@@ -553,10 +409,9 @@ Main Tutor: ${t.name} (${t.city})
 Dialogue Partner: ${t.partnerName}
 Avoid duplicating these previous lesson titles: ${(params.avoidTitles || []).slice(-15).join(" | ") || "None"}`;
 
-  const [partOneRes, partTwoRes] = await Promise.all([
-    ai.models.generateContent({
-      model: "gemini-4-hydrogen",
-      contents: `${sharedBrief}
+  const [rawPart1, rawPart2] = await Promise.all([
+    generateJson({
+      prompt: `${sharedBrief}
 
 Create Part 1 of this lesson (Lesson Metadata + Listening + Speaking), matching the EXACT quality of our curated lessons:
 1. titleEn, titleThai (concise natural Thai, no numbering), summaryThai (1-2 Thai sentences), culturalInsightThai (1-2 Thai sentences), durationMinutes (12-18).
@@ -564,13 +419,12 @@ Create Part 1 of this lesson (Lesson Metadata + Listening + Speaking), matching 
 3. listening.questions: MUST contain EXACTLY 2 multiple-choice comprehension questions in Thai, each with 3 distinct options in Thai and correctIndex (0, 1, or 2) + explanationThai.
 4. speaking.shadowingPhrases: MUST contain EXACTLY 3 practical phrases for this scenario. stressGuide uses UPPERCASE for stressed words (no asterisks), valid /IPA/, thaiMeaning, and nativeTipThai.
 5. speaking.roleplayTitle, roleplayContextThai, roleplayScenarioPrompt, openingLineEn, openingLineThai.`,
-      config: {
-        systemInstruction:
-          "You are an expert English curriculum designer for Thai learners. Always populate EVERY requested array with the exact item count requested (4 dialogue lines, 2 listening questions, 3 shadowing phrases). Never return empty arrays. Never use markdown asterisks (**).",
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        maxOutputTokens: 8192,
-        responseSchema: {
+      systemInstruction:
+        "You are an expert English curriculum designer for Thai learners. Always populate EVERY requested array with the exact item count requested (4 dialogue lines, 2 listening questions, 3 shadowing phrases). Never return empty arrays. Never use markdown asterisks (**).",
+      thinkingLevel: "LOW",
+      maxOutputTokens: 8192,
+      label: "ส่วนฟังและพูด",
+      schema: {
           type: Type.OBJECT,
           required: [
             "titleEn",
@@ -677,11 +531,9 @@ Create Part 1 of this lesson (Lesson Metadata + Listening + Speaking), matching 
             },
           },
         },
-      } as never,
     }),
-    ai.models.generateContent({
-      model: "gemini-4-hydrogen",
-      contents: `${sharedBrief}
+    generateJson({
+      prompt: `${sharedBrief}
 
 Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of our curated lessons:
 1. reading.formatLabel (e.g. "Neighborhood Note", "Chat Thread", "Travel Sign"), reading.headline, reading.authorMeta ("${t.name} · ${t.city} · 2 min read").
@@ -689,13 +541,12 @@ Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of 
 3. reading.expressions: MUST contain EXACTLY 4 useful phrases/expressions taken VERBATIM (exact spelling!) from those 3 paragraphs. Include valid /IPA/, register ("Casual" | "Neutral" | "Workplace" | "Idiomatic"), meaningThai, and example sentence.
 4. reading.questions: MUST contain EXACTLY 2 comprehension questions in Thai, each with 3 options, correctIndex (0, 1, or 2), and explanationThai.
 5. writing: promptTitle (short English title), promptInstructionThai, promptInstructionEn, targetExpressions (EXACTLY 4 English phrases), minWords (${params.rankId === "A1" ? 12 : params.rankId === "A2" ? 18 : 25}), sampleStarter.`,
-      config: {
-        systemInstruction:
-          "You are an expert English curriculum designer for Thai learners. Always populate EVERY requested array with the exact item count requested (3 paragraphs, 4 expressions appearing verbatim in the paragraphs, 2 reading questions, 4 targetExpressions). Never return empty arrays. Never use markdown asterisks (**).",
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        maxOutputTokens: 8192,
-        responseSchema: {
+      systemInstruction:
+        "You are an expert English curriculum designer for Thai learners. Always populate EVERY requested array with the exact item count requested (3 paragraphs, 4 expressions appearing verbatim in the paragraphs, 2 reading questions, 4 targetExpressions). Never return empty arrays. Never use markdown asterisks (**).",
+      thinkingLevel: "LOW",
+      maxOutputTokens: 8192,
+      label: "ส่วนอ่านและเขียน",
+      schema: {
           type: Type.OBJECT,
           required: ["reading", "writing"],
           properties: {
@@ -784,14 +635,11 @@ Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of 
             },
           },
         },
-      } as never,
     }),
   ]).catch((err) => {
     throw formatError(err);
   });
 
-  const rawPart1 = parseModelJson(partOneRes.text, "ส่วนฟังและพูด");
-  const rawPart2 = parseModelJson(partTwoRes.text, "ส่วนอ่านและเขียน");
   const raw = { ...rawPart1, ...rawPart2 };
   const lessonId = `${params.rankId}-${params.sequenceNumber}-${Date.now()}`;
   const paddedNumber = String(params.sequenceNumber).padStart(2, "0");
@@ -1071,7 +919,6 @@ Create Part 2 of this lesson (Reading + Writing), matching the EXACT quality of 
 export async function apiGenerateExam(params: {
   rankId: string;
 }): Promise<{ exam: PromotionExam }> {
-  const ai = getClient();
   const pedagogy =
     RANK_PEDAGOGY_GUIDE[params.rankId] || RANK_PEDAGOGY_GUIDE.A1;
   const tutorKeys = Object.keys(TUTOR_META);
@@ -1079,9 +926,8 @@ export async function apiGenerateExam(params: {
     tutorKeys[Math.floor(Math.random() * tutorKeys.length)] || "maya";
   const examiner = TUTOR_META[examinerTutorId];
 
-  const response = await ai.models.generateContent({
-    model: "gemini-4-hydrogen",
-    contents: `Create a fresh 4-skill Rank Promotion Exam to test whether a Thai learner has mastered CEFR ${params.rankId} (${pedagogy}) and is ready to advance to the next level.
+  const raw = await generateJson({
+    prompt: `Create a fresh 4-skill Rank Promotion Exam to test whether a Thai learner has mastered CEFR ${params.rankId} (${pedagogy}) and is ready to advance to the next level.
 Examiner: ${examiner.name} from ${examiner.city}.
 
 Requirements (ALL arrays must be populated completely):
@@ -1089,11 +935,10 @@ Requirements (ALL arrays must be populated completely):
 2. reading: Headline + authentic short passage (2-3 paragraphs matching ${params.rankId}) + EXACTLY 2 comprehension/nuance questions in Thai (3 distinct options each, correctIndex 0-2, Thai explanation).
 3. speaking: A realistic spoken question/prompt from ${examiner.name} in English (promptEn) + Thai translation (promptThai) + helpful guidance in Thai.
 4. writing: A realistic writing prompt in English (promptEn) + Thai instruction (promptThai) + appropriate minWords (${params.rankId === "A1" ? 15 : params.rankId === "A2" ? 20 : 30}).`,
-    config: {
-      systemInstruction:
-        "You are a fair, authoritative English proficiency examiner. Design a realistic, practical 4-skill promotion test matching the exact CEFR level. Always populate all arrays with 2 questions and 3 options each. Never use markdown asterisks (**).",
-      responseMimeType: "application/json",
-      responseSchema: {
+    systemInstruction:
+      "You are a fair, authoritative English proficiency examiner. Design a realistic, practical 4-skill promotion test matching the exact CEFR level. Always populate all arrays with 2 questions and 3 options each. Never use markdown asterisks (**).",
+    label: "ข้อสอบเลื่อนลำดับขั้น",
+    schema: {
         type: Type.OBJECT,
         required: ["listening", "reading", "speaking", "writing"],
         properties: {
@@ -1175,10 +1020,8 @@ Requirements (ALL arrays must be populated completely):
           },
         },
       },
-    } as never,
   });
 
-  const raw = JSON.parse((response.text ?? "{}").trim());
   const listeningQuestions = (
     Array.isArray(raw.listening?.questions) ? raw.listening.questions : []
   ).map(
@@ -1300,38 +1143,26 @@ export async function apiGradeExam(params: {
   writingText?: string;
   writingPromptEn?: string;
 }): Promise<PromotionExamResult> {
-  const ai = getClient();
   const listeningScore = params.listeningScore ?? 0;
   const readingScore = params.readingScore ?? 0;
   const passingScore = params.passingScore ?? 70;
   let spokenTranscript = (params.speakingTextFallback || "").trim();
 
   if (params.speakingAudioBase64) {
-    const trRes = await ai.models.generateContent({
-      model: "gemini-3.5-transcribe",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: params.speakingMimeType || "audio/webm",
-              data: params.speakingAudioBase64,
-            },
-          },
-          {
-            text: "Transcribe the spoken English accurately. Return only the spoken words.",
-          },
-        ],
-      },
+    const transcript = await transcribeAudio({
+      audioBase64: params.speakingAudioBase64,
+      mimeType: params.speakingMimeType,
+      prompt:
+        "Transcribe the spoken English accurately. Return only the spoken words.",
     });
-    spokenTranscript = (trRes.text ?? "").trim() || spokenTranscript;
+    spokenTranscript = transcript || spokenTranscript;
   }
 
   const pedagogy =
     RANK_PEDAGOGY_GUIDE[params.rankId] || RANK_PEDAGOGY_GUIDE.A1;
 
-  const gradeRes = await ai.models.generateContent({
-    model: "gemini-4-hydrogen",
-    contents: `Grade the Speaking and Writing sections of a CEFR ${params.rankId} Promotion Exam (${pedagogy}).
+  const parsed = await generateJson({
+    prompt: `Grade the Speaking and Writing sections of a CEFR ${params.rankId} Promotion Exam (${pedagogy}).
 Passing standard: ${passingScore}/100.
 
 Speaking Prompt: "${params.speakingPromptEn || ""}"
@@ -1344,26 +1175,22 @@ Listening Score (objective): ${listeningScore}/100
 Reading Score (objective): ${readingScore}/100
 
 Grade realistically and fairly for ${params.rankId} level (don't expect C2 perfection for an A1 beginner, but ensure genuine communicative competence at ${params.rankId}).`,
-    config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
-      systemInstruction:
-        "You are a fair native English examiner grading a Thai learner's Promotion Test. Provide honest numeric scores (0-100) for speaking and writing, plus encouraging, actionable feedback in natural Thai.",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          speakingScore: { type: Type.INTEGER },
-          writingScore: { type: Type.INTEGER },
-          speakingFeedbackThai: { type: Type.STRING },
-          writingFeedbackThai: { type: Type.STRING },
-          verdictThai: { type: Type.STRING },
-          nextStepsThai: { type: Type.STRING },
-        },
+    systemInstruction:
+      "You are a fair native English examiner grading a Thai learner's Promotion Test. Provide honest numeric scores (0-100) for speaking and writing, plus encouraging, actionable feedback in natural Thai.",
+    thinkingLevel: "MEDIUM",
+    label: "ผลสอบเลื่อนลำดับขั้น",
+    schema: {
+      type: Type.OBJECT,
+      properties: {
+        speakingScore: { type: Type.INTEGER },
+        writingScore: { type: Type.INTEGER },
+        speakingFeedbackThai: { type: Type.STRING },
+        writingFeedbackThai: { type: Type.STRING },
+        verdictThai: { type: Type.STRING },
+        nextStepsThai: { type: Type.STRING },
       },
-    } as never,
+    },
   });
-
-  const parsed = JSON.parse((gradeRes.text ?? "{}").trim());
   const speakingScore = Math.max(
     0,
     Math.min(100, Number(parsed.speakingScore ?? 0))
