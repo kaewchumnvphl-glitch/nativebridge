@@ -134,7 +134,7 @@ export const PROVIDERS: ProviderDefinition[] = [
     helpThai:
       "ระบุ Base URL แบบ OpenAI-compatible (เช่น https://api.example.com/v1) และชื่อโมเดลเอง",
     allowBaseUrlEdit: true,
-    ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์และการถอดเสียง",
+    ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์คุณภาพสูง",
   },
 ];
 
