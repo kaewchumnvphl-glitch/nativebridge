@@ -12,6 +12,8 @@ import {
   clearApiKey,
   hasApiKey,
   getGeminiClient,
+  getElevenLabsKey,
+  apiElevenLabsTts,
   generateJson,
   transcribeAudio,
   validateProviderKey,
@@ -109,10 +111,30 @@ export interface TtsRequest {
 export async function apiTts(
   params: TtsRequest
 ): Promise<{ audioBase64: string; mimeType: string }> {
-  // TTS ใช้ Gemini โดยตรง — ค่ายอื่น audio.ts จะ fallback ไป speechSynthesis
+  const isDialogue =
+    Array.isArray(params.multiSpeaker) && params.multiSpeaker.length === 2;
+
+  // ใช้ ElevenLabs ก่อนเมื่อมี key (ประหยัดโควตาเสียง Gemini)
+  // ถ้า ElevenLabs ไม่สำเร็จหรือไม่มี key → ใช้ Gemini ตามเดิม
+  if (getElevenLabsKey()) {
+    try {
+      const spokenText = isDialogue
+        ? params.multiSpeaker!.map((l) => `${l.speaker}: ${l.text}`).join("\n")
+        : (params.text || "").trim();
+      if (spokenText) {
+        return await apiElevenLabsTts({
+          text: spokenText,
+          style: params.style,
+        });
+      }
+    } catch {
+      // fall through ไป Gemini
+    }
+  }
+
   const ai = getGeminiClient();
 
-  if (Array.isArray(params.multiSpeaker) && params.multiSpeaker.length === 2) {
+  if (isDialogue) {
     const response = await ai.models.generateContent({
       model: "gemini-3.8-flash-tts",
       contents: [

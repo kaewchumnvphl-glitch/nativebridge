@@ -1,7 +1,7 @@
 import { apiTts } from "../lib/gemini";
 
 let currentAudio: HTMLAudioElement | null = null;
-const ttsCache = new Map<string, string>();
+const ttsCache = new Map<string, { audioBase64: string; mimeType: string }>();
 
 export function stopActiveAudio() {
   if (currentAudio) {
@@ -14,10 +14,14 @@ export function stopActiveAudio() {
   }
 }
 
-export async function playBase64Wav(base64: string, playbackRate = 1.0): Promise<void> {
+export async function playBase64Wav(
+  base64: string,
+  playbackRate = 1.0,
+  mimeType = "audio/wav"
+): Promise<void> {
   stopActiveAudio();
   return new Promise((resolve, reject) => {
-    const audio = new Audio(`data:audio/wav;base64,${base64}`);
+    const audio = new Audio(`data:${mimeType};base64,${base64}`);
     audio.playbackRate = playbackRate;
     currentAudio = audio;
     audio.onended = () => {
@@ -55,7 +59,11 @@ export async function speakNativeText(params: {
 
   const cached = ttsCache.get(cacheKey);
   if (cached) {
-    await playBase64Wav(cached, params.playbackRate ?? 1.0);
+    await playBase64Wav(
+      cached.audioBase64,
+      params.playbackRate ?? 1.0,
+      cached.mimeType
+    );
     return { usedFallback: false };
   }
 
@@ -71,8 +79,15 @@ export async function speakNativeText(params: {
       throw new Error("Empty audio payload");
     }
 
-    ttsCache.set(cacheKey, data.audioBase64);
-    await playBase64Wav(data.audioBase64, params.playbackRate ?? 1.0);
+    ttsCache.set(cacheKey, {
+      audioBase64: data.audioBase64,
+      mimeType: data.mimeType || "audio/wav",
+    });
+    await playBase64Wav(
+      data.audioBase64,
+      params.playbackRate ?? 1.0,
+      data.mimeType || "audio/wav"
+    );
     return { usedFallback: false };
   } catch {
     // Graceful browser SpeechSynthesis fallback if network/API quota fails

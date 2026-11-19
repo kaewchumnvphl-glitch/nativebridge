@@ -19,12 +19,11 @@ import {
   PROVIDERS,
   getActiveConfig,
   getProviderDefinition,
+  getProviderConfig,
   getMaskedKey,
   hasApiKey,
   setProviderId,
-  setApiKey,
-  setModelOverride,
-  setBaseUrlOverride,
+  saveProviderConfig,
   validateProviderKey,
   type ProviderId,
 } from "../lib/providers";
@@ -271,11 +270,12 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
 
   const changeProvider = (id: ProviderId) => {
     const def = getProviderDefinition(id);
+    const saved = getProviderConfig(id);
     setSelectedProvider(id);
-    setKey("");
+    setKey(saved?.key || "");
     setError(null);
-    setModel("");
-    setBaseUrl(def.allowBaseUrlEdit ? def.baseUrl : "");
+    setModel(saved?.model && saved.model !== def.defaultModel ? saved.model : "");
+    setBaseUrl(def.allowBaseUrlEdit ? saved?.baseUrl || def.baseUrl : "");
   };
 
   const submit = async () => {
@@ -286,9 +286,7 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
     const result = await validateProviderKey(trimmed, providerId, baseUrl);
     if (result.ok) {
       setProviderId(providerId);
-      setApiKey(trimmed);
-      setModelOverride(model);
-      setBaseUrlOverride(baseUrl);
+      saveProviderConfig(providerId, trimmed, model, baseUrl);
       onDone();
     } else {
       setError(result.errorThai || "ตรวจสอบ key ไม่ผ่าน");
@@ -309,8 +307,9 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
               : "ขั้นตอนที่ 1 — ใส่ API Key ของคุณ"}
           </h2>
           <p className="text-sm text-slate-500">
-            รองรับ Gemini, OpenAI, Claude, OpenRouter, Groq, DeepSeek, Mistral
-            หรือ endpoint แบบ OpenAI-compatible — ใช้ key ของตัวเอง คุมโควตาเอง
+            รองรับ Gemini, OpenAI, Claude, OpenRouter, Groq, DeepSeek, Mistral,
+            NVIDIA NIM, Hugging Face หรือ endpoint แบบ OpenAI-compatible — ใช้ key
+            ของตัวเอง เก็บหลายค่ายไว้ในเครื่อง สลับสำรองเมื่อโควตาเต็ม
           </p>
         </div>
       </div>
@@ -421,10 +420,11 @@ function ApiKeyStep({ onDone }: { onDone: () => void }) {
       {provider.ttsNoteThai && (
         <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {provider.ttsNoteThai} ฟังก์ชันอ่านออกเสียงจะใช้เสียงของเบราว์เซอร์แทน
+          เสียงพากย์จะใช้ ElevenLabs หรือ Gemini key ที่คุณเก็บไว้ในเครื่อง (สลับสำรองอัตโนมัติ)
           {provider.id !== "openai" && provider.id !== "groq" && provider.id !== "custom"
-            ? " และการถอดเสียงจากไมโครโฟนยังต้องใช้ Gemini / OpenAI / Groq"
+            ? " ส่วนการถอดเสียงจากไมโครโฟนใช้ Gemini / OpenAI / Groq"
             : ""}
+          {" หากไม่มี key สำหรับเสียง จะใช้เสียงของเบราว์เซอร์แทน"}
         </p>
       )}
 

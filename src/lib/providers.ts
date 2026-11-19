@@ -14,6 +14,8 @@ export type ProviderId =
   | "groq"
   | "deepseek"
   | "mistral"
+  | "nim"
+  | "huggingface"
   | "custom";
 
 export type ProviderKind = "gemini" | "openai" | "anthropic";
@@ -124,6 +126,32 @@ export const PROVIDERS: ProviderDefinition[] = [
     ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์และการถอดเสียง",
   },
   {
+    id: "nim",
+    label: "NVIDIA NIM",
+    kind: "openai",
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    defaultModel: "mistralai/mistral-large-4-1t-a52b",
+    keyHint: "nvapi-...",
+    docsUrl: "https://build.nvidia.com/settings/api-keys",
+    helpThai:
+      "ล็อกอิน NVIDIA NGC → build.nvidia.com → Settings → API Keys (ขึ้นต้น nvapi-)",
+    allowBaseUrlEdit: false,
+    ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์คุณภาพสูง",
+  },
+  {
+    id: "huggingface",
+    label: "Hugging Face Router",
+    kind: "openai",
+    baseUrl: "https://router.huggingface.co/v1",
+    defaultModel: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    keyHint: "hf_...",
+    docsUrl: "https://huggingface.co/settings/tokens",
+    helpThai:
+      "ล็อกอิน Hugging Face → Settings → Access Tokens → สร้าง token แบบ Read (ขึ้นต้น hf_)",
+    allowBaseUrlEdit: false,
+    ttsNoteThai: "รองรับเฉพาะ Gemini key สำหรับเสียงพากย์คุณภาพสูง",
+  },
+  {
     id: "custom",
     label: "อื่น ๆ (OpenAI-compatible)",
     kind: "openai",
@@ -146,6 +174,8 @@ const PROVIDER_STORAGE = "nativebridge_provider_v1";
 const KEY_STORAGE = "nativebridge_api_key_v1";
 const MODEL_STORAGE = "nativebridge_model_v1";
 const BASE_URL_STORAGE = "nativebridge_base_url_v1";
+const KEY_VAULT_STORAGE = "nativebridge_keys_v1";
+const ELEVENLABS_STORAGE = "nativebridge_elevenlabs_key_v1";
 
 function safeGet(key: string): string | null {
   try {
@@ -182,16 +212,68 @@ export function setProviderId(id: ProviderId) {
   if (PROVIDER_MAP[id]) safeSet(PROVIDER_STORAGE, id);
 }
 
+export interface SavedProviderConfig {
+  key: string;
+  model?: string;
+  baseUrl?: string;
+}
+
+type KeyVault = Partial<Record<ProviderId, SavedProviderConfig>>;
+
+export function getKeyVault(): KeyVault {
+  try {
+    const raw = safeGet(KEY_VAULT_STORAGE);
+    return raw ? (JSON.parse(raw) as KeyVault) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function getProviderConfig(id: ProviderId): SavedProviderConfig | null {
+  return getKeyVault()[id] || null;
+}
+
+export function saveProviderConfig(
+  id: ProviderId,
+  key: string,
+  model?: string,
+  baseUrl?: string
+) {
+  const vault = getKeyVault();
+  vault[id] = {
+    key: key.trim(),
+    model: model?.trim() || undefined,
+    baseUrl: baseUrl?.trim().replace(/\/+$/, "") || undefined,
+  };
+  safeSet(KEY_VAULT_STORAGE, JSON.stringify(vault));
+  // เก็บ key ของค่ายที่เลือก active ไว้ใน storage เดิมด้วย (เข้ากันกับ access.ts)
+  if (id === getProviderId()) {
+    safeSet(KEY_STORAGE, key.trim());
+    if (model?.trim()) safeSet(MODEL_STORAGE, model.trim());
+    else safeRemove(MODEL_STORAGE);
+    if (baseUrl?.trim()) safeSet(BASE_URL_STORAGE, baseUrl.trim());
+    else safeRemove(BASE_URL_STORAGE);
+  }
+}
+
 export function getApiKey(): string | null {
-  return safeGet(KEY_STORAGE) || null;
+  const active = getProviderId();
+  return getProviderConfig(active)?.key || safeGet(KEY_STORAGE) || null;
 }
 
 export function setApiKey(key: string) {
-  safeSet(KEY_STORAGE, key.trim());
+  const id = getProviderId();
+  saveProviderConfig(id, key, getModelOverride(), getBaseUrlOverride());
 }
 
 export function clearApiKey() {
+  const id = getProviderId();
+  const vault = getKeyVault();
+  delete vault[id];
+  safeSet(KEY_VAULT_STORAGE, JSON.stringify(vault));
   safeRemove(KEY_STORAGE);
+  safeRemove(MODEL_STORAGE);
+  safeRemove(BASE_URL_STORAGE);
 }
 
 export function hasApiKey(): boolean {
@@ -199,23 +281,39 @@ export function hasApiKey(): boolean {
 }
 
 export function getModelOverride(): string {
+  const active = getProviderConfig(getProviderId());
+  if (active?.model) return active.model;
   return (safeGet(MODEL_STORAGE) || "").trim();
 }
 
 export function setModelOverride(model: string) {
   const value = model.trim();
-  if (value) safeSet(MODEL_STORAGE, value);
-  else safeRemove(MODEL_STORAGE);
+  const id = getProviderId();
+  const cfg = getProviderConfig(id) || { key: getApiKey() || "" };
+  saveProviderConfig(id, cfg.key, value, cfg.baseUrl || getBaseUrlOverride());
 }
 
 export function getBaseUrlOverride(): string {
+  const active = getProviderConfig(getProviderId());
+  if (active?.baseUrl) return active.baseUrl.replace(/\/+$/, "");
   return (safeGet(BASE_URL_STORAGE) || "").trim().replace(/\/+$/, "");
 }
 
 export function setBaseUrlOverride(baseUrl: string) {
   const value = baseUrl.trim().replace(/\/+$/, "");
-  if (value) safeSet(BASE_URL_STORAGE, value);
-  else safeRemove(BASE_URL_STORAGE);
+  const id = getProviderId();
+  const cfg = getProviderConfig(id) || { key: getApiKey() || "" };
+  saveProviderConfig(id, cfg.key, cfg.model || getModelOverride(), value);
+}
+
+export function getElevenLabsKey(): string {
+  return (safeGet(ELEVENLABS_STORAGE) || "").trim();
+}
+
+export function setElevenLabsKey(key: string) {
+  const value = key.trim();
+  if (value) safeSet(ELEVENLABS_STORAGE, value);
+  else safeRemove(ELEVENLABS_STORAGE);
 }
 
 export function getProviderDefinition(id?: ProviderId): ProviderDefinition {
@@ -237,6 +335,21 @@ export function getActiveConfig(): ActiveConfig {
     model: getModelOverride() || provider.defaultModel,
     baseUrl: getBaseUrlOverride() || provider.baseUrl,
   };
+}
+
+export function configForProvider(id: ProviderId): ActiveConfig {
+  const provider = getProviderDefinition(id);
+  const saved = getProviderConfig(id);
+  return {
+    provider,
+    key: saved?.key || "",
+    model: saved?.model || provider.defaultModel,
+    baseUrl: saved?.baseUrl || provider.baseUrl,
+  };
+}
+
+export function listConfiguredProviders(): ActiveConfig[] {
+  return PROVIDERS.map((p) => configForProvider(p.id)).filter((c) => Boolean(c.key));
 }
 
 export function getMaskedKey(): string {
@@ -355,10 +468,13 @@ function makeGeminiClient(key: string): GoogleGenAI {
   });
 }
 
-/** ใช้เฉพาะ TTS (Gemini) — ค่ายอื่นให้ audio.ts fallback ไป speechSynthesis */
+/**
+ * ใช้เฉพาะ TTS/ถอดเสียง (Gemini)
+ * ถ้าเก็บ Gemini key ไว้ใน vault จะใช้ได้แม้ผู้ให้บริการหลักเป็นค่ายอื่น
+ */
 export function getGeminiClient(): GoogleGenAI {
-  const { provider, key } = getActiveConfig();
-  if (provider.id !== "gemini" || !key) {
+  const key = configForProvider("gemini").key;
+  if (!key) {
     throw new Error(
       "เสียงพากย์คุณภาพสูงใช้ได้กับ Gemini key — แอปจะใช้เสียงจากเบราว์เซอร์แทน"
     );
@@ -445,13 +561,27 @@ export interface GenerateJsonOptions {
   label?: string;
 }
 
-export async function generateJson(
-  opts: GenerateJsonOptions
-): Promise<Record<string, any>> {
-  const { provider, key, model, baseUrl } = getActiveConfig();
-  if (!key) throw formatApiError(new Error("missing key"), provider.label);
+function isQuotaError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return [
+    "429",
+    "resource_exhausted",
+    "quota",
+    "rate limit",
+    "too many requests",
+    "insufficient_quota",
+    "high demand",
+    "overloaded",
+    "503",
+  ].some((token) => msg.includes(token));
+}
 
-  const label = opts.label || "ข้อมูลจากโมเดล";
+async function callJson(
+  cfg: ActiveConfig,
+  opts: GenerateJsonOptions,
+  label: string
+): Promise<Record<string, any>> {
+  const { provider, key, model, baseUrl } = cfg;
   const baseSystem = opts.systemInstruction || "";
   const jsonRule =
     "ตอบกลับด้วย JSON object ที่สมบูรณ์เพียง 1 ชิ้นเท่านั้น ห้ามขึ้นโค้ดเฟนซ์ ``` ห้ามคำอธิบายเพิ่ม";
@@ -460,95 +590,137 @@ export async function generateJson(
     system += `\n\nRequired JSON structure:\n${JSON.stringify(opts.schema)}`;
   }
 
-  try {
-    if (provider.kind === "gemini") {
-      const config: Record<string, unknown> = {
-        systemInstruction: baseSystem,
-        responseMimeType: "application/json",
-      };
-      if (opts.schema) config.responseSchema = opts.schema;
-      if (opts.thinkingLevel) {
-        config.thinkingConfig = {
-          thinkingLevel:
-            opts.thinkingLevel === "MEDIUM"
-              ? ThinkingLevel.MEDIUM
-              : ThinkingLevel.LOW,
-        };
-      }
-      if (opts.maxOutputTokens) config.maxOutputTokens = opts.maxOutputTokens;
-
-      const response = await makeGeminiClient(key).models.generateContent({
-        model,
-        contents: opts.prompt,
-        config: config as never,
-      });
-      return parseModelJson(response.text, label);
-    }
-
-    if (provider.kind === "anthropic") {
-      const response = await fetch(`${baseUrl}/messages`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": key,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: Math.min(opts.maxOutputTokens || 4096, 8192),
-          system,
-          messages: [{ role: "user", content: opts.prompt }],
-        }),
-      });
-      const data = await readJsonResponse(response, provider.label);
-      const text = (Array.isArray(data?.content) ? data.content : [])
-        .filter((block: { type?: string }) => block.type === "text")
-        .map((block: { text?: string }) => block.text || "")
-        .join("\n");
-      return parseModelJson(text, label);
-    }
-
-    /* OpenAI-compatible: OpenAI / OpenRouter / Groq / DeepSeek / Mistral / custom */
-    const body: Record<string, unknown> = {
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: opts.prompt },
-      ],
-      temperature: 0.4,
-      ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
+  if (provider.kind === "gemini") {
+    const config: Record<string, unknown> = {
+      systemInstruction: baseSystem,
+      responseMimeType: "application/json",
     };
+    if (opts.schema) config.responseSchema = opts.schema;
+    if (opts.thinkingLevel) {
+      config.thinkingConfig = {
+        thinkingLevel:
+          opts.thinkingLevel === "MEDIUM"
+            ? ThinkingLevel.MEDIUM
+            : ThinkingLevel.LOW,
+      };
+    }
+    if (opts.maxOutputTokens) config.maxOutputTokens = opts.maxOutputTokens;
 
-    let response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await makeGeminiClient(key).models.generateContent({
+      model,
+      contents: opts.prompt,
+      config: config as never,
+    });
+    return parseModelJson(response.text, label);
+  }
+
+  if (provider.kind === "anthropic") {
+    const response = await fetch(`${baseUrl}/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: Math.min(opts.maxOutputTokens || 4096, 8192),
+        system,
+        messages: [{ role: "user", content: opts.prompt }],
+      }),
+    });
+    const data = await readJsonResponse(response, provider.label);
+    const text = (Array.isArray(data?.content) ? data.content : [])
+      .filter((block: { type?: string }) => block.type === "text")
+      .map((block: { text?: string }) => block.text || "")
+      .join("\n");
+    return parseModelJson(text, label);
+  }
+
+  /* OpenAI-compatible */
+  const body: Record<string, unknown> = {
+    model,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: opts.prompt },
+    ],
+    temperature: 0.4,
+    ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
+  };
+
+  let response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({ ...body, response_format: { type: "json_object" } }),
+  });
+
+  // บาง endpoint ไม่รองรับ response_format → ลองใหม่โดยไม่ใส่
+  if (response.status === 400) {
+    response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify({ ...body, response_format: { type: "json_object" } }),
+      body: JSON.stringify(body),
     });
-
-    // บาง endpoint แบบ OpenAI-compatible ไม่รองรับ response_format → ลองใหม่โดยไม่ใส่
-    if (response.status === 400) {
-      response = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify(body),
-      });
-    }
-
-    const data = await readJsonResponse(response, provider.label);
-    const content = data?.choices?.[0]?.message?.content ?? "";
-    return parseModelJson(
-      typeof content === "string" ? content : JSON.stringify(content),
-      label
-    );
-  } catch (err) {
-    throw formatApiError(err, provider.label);
   }
+
+  const data = await readJsonResponse(response, provider.label);
+  const content = data?.choices?.[0]?.message?.content ?? "";
+  return parseModelJson(
+    typeof content === "string" ? content : JSON.stringify(content),
+    label
+  );
+}
+
+let preferredProviderId: ProviderId | null = null;
+
+/**
+ * สร้าง JSON แบบ provider-agnostic
+ * ถ้าโควตาของค่ายหลักเต็ม (429 / quota / high demand) จะสลับไป key อื่นที่เก็บไว้ใน vault อัตโนมัติ
+ */
+export async function generateJson(
+  opts: GenerateJsonOptions
+): Promise<Record<string, any>> {
+  const label = opts.label || "ข้อมูลจากโมเดล";
+  const active = getActiveConfig();
+  const configured = listConfiguredProviders();
+  if (!active.key && configured.length === 0) {
+    throw formatApiError(new Error("missing key"), active.provider.label);
+  }
+
+  const order: ActiveConfig[] = [];
+  const seen = new Set<ProviderId>();
+  const push = (cfg: ActiveConfig) => {
+    if (cfg.key && !seen.has(cfg.provider.id)) {
+      seen.add(cfg.provider.id);
+      order.push(cfg);
+    }
+  };
+  if (preferredProviderId) {
+    const preferred = configured.find((c) => c.provider.id === preferredProviderId);
+    if (preferred) push(preferred);
+  }
+  push(active);
+  configured.forEach(push);
+
+  let lastError: unknown = null;
+  for (const cfg of order) {
+    try {
+      const result = await callJson(cfg, opts, label);
+      preferredProviderId = cfg.provider.id;
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (!isQuotaError(err)) throw formatApiError(err, cfg.provider.label);
+      // โควตาเต็ม → ลองค่ายถัดไป
+    }
+  }
+  throw formatApiError(lastError, active.provider.label);
 }
 
 /* ================= transcription ================= */
@@ -569,57 +741,128 @@ function audioExtension(mimeType: string): string {
   return "webm";
 }
 
-export async function transcribeAudio(params: {
+type TranscribeParams = {
   audioBase64: string;
   mimeType?: string;
   prompt?: string;
-}): Promise<string> {
-  const { provider, key, baseUrl, model } = getActiveConfig();
-  if (!key) throw formatApiError(new Error("missing key"), provider.label);
+};
+
+/** คืน null = ค่ายนี้ไม่รองรับการถอดเสียง */
+async function callTranscribe(
+  cfg: ActiveConfig,
+  params: TranscribeParams
+): Promise<string | null> {
+  const { provider, key, baseUrl, model } = cfg;
   const mimeType = params.mimeType || "audio/webm";
 
-  try {
-    if (provider.kind === "gemini") {
-      const response = await makeGeminiClient(key).models.generateContent({
-        model: "gemini-3.5-transcribe",
-        contents: {
-          parts: [
-            { inlineData: { mimeType, data: params.audioBase64 } },
-            {
-              text:
-                params.prompt ||
-                "Transcribe the spoken English accurately. Return only the spoken words without extra commentary.",
-            },
-          ],
-        },
-      });
-      return (response.text ?? "").trim();
-    }
-
-    const transcribeModel =
-      provider.transcriptionModel ||
-      (provider.id === "custom" ? model : "");
-    if (provider.kind === "openai" && transcribeModel) {
-      const form = new FormData();
-      form.append(
-        "file",
-        base64ToBlob(params.audioBase64, mimeType),
-        `speech.${audioExtension(mimeType)}`
-      );
-      form.append("model", transcribeModel);
-      const response = await fetch(`${baseUrl}/audio/transcriptions`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}` },
-        body: form,
-      });
-      const data = await readJsonResponse(response, provider.label);
-      return String(data?.text ?? "").trim();
-    }
-
-    throw new Error(
-      `ผู้ให้บริการ ${provider.label} ยังไม่รองรับการถอดเสียง — เปลี่ยนเป็น Gemini / OpenAI / Groq หรือใช้โหมดพิมพ์แทนได้`
-    );
-  } catch (err) {
-    throw formatApiError(err, provider.label);
+  if (provider.kind === "gemini") {
+    const response = await makeGeminiClient(key).models.generateContent({
+      model: "gemini-3.5-transcribe",
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data: params.audioBase64 } },
+          {
+            text:
+              params.prompt ||
+              "Transcribe the spoken English accurately. Return only the spoken words without extra commentary.",
+          },
+        ],
+      },
+    });
+    return (response.text ?? "").trim();
   }
+
+  const transcribeModel =
+    provider.transcriptionModel || (provider.id === "custom" ? model : "");
+  if (provider.kind === "openai" && transcribeModel) {
+    const form = new FormData();
+    form.append(
+      "file",
+      base64ToBlob(params.audioBase64, mimeType),
+      `speech.${audioExtension(mimeType)}`
+    );
+    form.append("model", transcribeModel);
+    const response = await fetch(`${baseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    const data = await readJsonResponse(response, provider.label);
+    return String(data?.text ?? "").trim();
+  }
+
+  return null;
+}
+
+/**
+ * ถอดเสียงจากค่ายที่มี key เก็บไว้ (Gemini / OpenAI / Groq / custom ก่อน)
+ * ถ้าโควตาเต็มจะลองค่ายถัดไปอัตโนมัติ
+ */
+export async function transcribeAudio(
+  params: TranscribeParams
+): Promise<string> {
+  const active = getActiveConfig();
+  const order: ActiveConfig[] = [];
+  const seen = new Set<ProviderId>();
+  const push = (cfg: ActiveConfig) => {
+    if (cfg.key && !seen.has(cfg.provider.id)) {
+      seen.add(cfg.provider.id);
+      order.push(cfg);
+    }
+  };
+  push(active);
+  listConfiguredProviders().forEach(push);
+
+  let lastError: unknown = null;
+  for (const cfg of order) {
+    try {
+      const text = await callTranscribe(cfg, params);
+      if (text !== null) return text;
+    } catch (err) {
+      lastError = err;
+      if (!isQuotaError(err)) throw formatApiError(err, cfg.provider.label);
+    }
+  }
+  if (lastError) throw formatApiError(lastError, active.provider.label);
+  throw new Error(
+    "ผู้ให้บริการที่เก็บ key ไว้ยังไม่รองรับการถอดเสียง — ใช้ Gemini / OpenAI / Groq หรือโหมดพิมพ์แทนได้"
+  );
+}
+
+/* ================= ElevenLabs TTS (ประหยัดโควตา Gemini) ================= */
+
+export async function apiElevenLabsTts(params: {
+  text: string;
+  style?: string;
+}): Promise<{ audioBase64: string; mimeType: string }> {
+  const key = getElevenLabsKey();
+  if (!key) throw new Error("ยังไม่ได้ใส่ ElevenLabs key");
+  const voiceId = "21m00Tcm4TlvDq8ikWAM"; // Rachel — natural US English
+  const response = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": key,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text: params.text,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    }
+  );
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 200);
+    throw new Error(`HTTP ${response.status}: ${detail}`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return { audioBase64: btoa(binary), mimeType: "audio/mpeg" };
 }
